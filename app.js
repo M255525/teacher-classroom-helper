@@ -115,10 +115,10 @@ function dust(n){
 const WARN_HTML = '<h2>⚠ 使用警語</h2><ul>' +
   '<li><b>名單只存在這台電腦的瀏覽器</b>，不會上傳。換電腦前請到「⚙ 常用設定 → 資料備份」下載備份檔。</li>' +
   '<li>抽籤與分組用瀏覽器的安全亂數，每次結果不同、無法事後重現；要留紀錄請自己截圖或複製。</li>' +
-  '<li>「即時投票」與「手機搶答」會透過作者架設的轉播站（Cloudflare）即時轉送<b>房間代碼、選項代號與學生自己輸入的暱稱</b>，不會傳名單姓名；轉播站不儲存，所有人離開房間就消失。投票結果只存在老師這台電腦。</li>' +
-  '<li>勾選「🏆 記名計分」時<b>不是匿名</b>：學生的學號會經轉播站送到老師電腦，成績檔含學號、姓名與每題作答，請依個資規定保管。</li>' +
+  '<li>「即時投票」與「手機搶答」會透過作者架設的轉播站（Cloudflare）即時轉送<b>房間代碼、選項代號與學生輸入的學號或姓名</b>（只送到老師電腦，學生之間看不到）；轉播站不儲存作答，所有人離開房間就消失。投票結果與點名只存在老師這台電腦。</li>' +
+  '<li>學生用手機加入時要輸入學號或姓名，老師電腦知道誰加入、誰投了什麼；大螢幕不顯示個人作答。勾「🏆 記名計分」時成績檔含學號、姓名與每題作答，請依個資規定保管。</li>' +
   '<li>上傳的名單、題庫檔案只在這台電腦的瀏覽器裡讀取，不會上傳。</li>' +
-  '<li>這裡的「匿名」是指畫面上不顯示誰投了什麼，<b>不是加密的正式投票</b>：知道代碼的人都能加入，換瀏覽器或無痕視窗也能再投一次。請勿用於選舉、計分考試或需要防作弊的場合。</li>' +
+  '<li>這<b>不是有身分驗證的正式投票或考試系統</b>：學生可以輸入別人的學號或姓名，換瀏覽器或無痕視窗也能再投一次。可以設「教室密碼」擋外人，但請勿用於選舉、正式考試或需要防作弊的場合。</li>' +
   '<li>手機搶答的先後以老師電腦收到的時間為準，網路快慢會影響結果；要求公平時請用「現場按鍵」。</li>' +
   '<li>教室沒有網路時，投票可以改用「✋ 舉手計票」手動加票，其他工具都能離線使用。</li>' +
   '<li>瀏覽器規定要先在頁面上點一下，音效才會發出聲音；投影前請先測試音量。</li></ul>';
@@ -399,13 +399,13 @@ function bzHit(i){
 }
 function bzPhone(id, nick){
   if (B.phase !== 'open' || S.buzz.src !== 'phone' || B.phone.some((o) => o.id === id)) return;
-  B.phone.push({id, nick:cut(nick, 14) || '同學', t:performance.now() - B.t0});
+  B.phone.push({id, nick:nick ? whoLabel(nick) : '同學', t:performance.now() - B.t0});
   if (B.phone.length === 1) { SND.buzz(); dust(30); }
   if (S.tab === 'buzz') bzPaint();
 }
 
 /* ---------- 📱 連線（老師端與學生端共用） ---------- */
-const NET = {ws:null, want:false, status:'off', code:'', role:'T', myId:randId(), peers:new Map(), retry:0, ping:0, q:[], qBusy:false, last:null, state:'T|w'};
+const NET = {who:new Map(), ws:null, want:false, status:'off', code:'', role:'T', myId:randId(), peers:new Map(), retry:0, ping:0, q:[], qBusy:false, last:null, state:'T|w'};
 function studentCount(){ let n = 0; NET.peers.forEach((v) => { if (!/^T\|/.test(v)) n++; }); return n; }
 function joinUrl(code){
   const here = location.protocol === 'https:' && location.hostname === 'm255525.github.io';
@@ -504,13 +504,15 @@ function pump(){
 }
 function onPeerName(id, name){
   const a = String(name || '').split('|');
+  const who = cleanWho(a[0] === 'S' ? a[3] : a[0] === 'B' ? a.slice(2).join('|') : a[0] === 'W' ? a[1] : '');
+  if (who) { NET.who.set(id, who); if (S.tab === 'vote' || S.tab === 'buzz') updJoined(); }
   if (a[0] === 'S') {
     const p = S.vote.cur; if (!p || p.state !== 'open' || a[1] !== p.pid) return;
     let ch = String(a[2] || '').toUpperCase().split('').filter((c, i, arr) => LETTERS.indexOf(c) >= 0 && LETTERS.indexOf(c) < p.n && arr.indexOf(c) === i).sort().join('');
     if (p.type !== 'm') ch = ch.slice(0, 1);
-    if (!ch) { delete p.votes[id]; if (p.who) delete p.who[id]; } else { p.votes[id] = ch; const stu = cleanStu(a[3]); if (stu) (p.who = p.who || {})[id] = stu; }
+    if (!ch) { delete p.votes[id]; if (p.who) delete p.who[id]; } else { p.votes[id] = ch; if (who) (p.who = p.who || {})[id] = who; }
     saveVoteSoon(); if (S.tab === 'vote') votePaint();
-  } else if (a[0] === 'B' && a[1] === B.rid) bzPhone(id, a.slice(2).join('|'));
+  } else if (a[0] === 'B' && a[1] === B.rid) bzPhone(id, who);
 }
 function netCard(){
   if (!NET.want) return '<div class="card joinCard"><h3>📱 手機連線</h3><p class="small" style="text-align:left">開放後會產生 6 碼代碼和 QR code，學生用手機掃描就能投票、搶答，不用下載 App、不用登入。</p><button class="btn y" data-act="netOn">📱 開放手機連線</button></div>';
@@ -520,7 +522,8 @@ function netCard(){
     (local ? '<p class="small" style="text-align:left">目前不是線上版網址，QR code 指向線上版：' + esc(ONLINE) + '</p>' : '') +
     '<div class="row c" style="margin-top:.5rem"><button class="btn alt" data-act="qrBig">🔍 放大 QR</button><button class="btn alt" data-act="copyJoin">🔗 複製連結</button><button class="btn alt" data-act="netNew">換代碼</button><button class="btn alt" data-act="netOff">中斷</button></div>' +
     '<div class="row c" style="margin-top:.5rem"><input class="tx" id="netPw" maxlength="8" placeholder="教室密碼（選填）" value="' + esc(NET.pw) + '" style="width:9.5rem;text-transform:uppercase" aria-label="教室密碼"><button class="btn alt" data-act="netPw">🔒 ' + (NET.pw ? '改密碼' : '設密碼') + '</button></div>' +
-    '<p class="small" style="text-align:left;margin:.3rem 0 0">只有知道代碼和密碼的人能加入；改密碼後已加入的學生要重新輸入。學生之間看不到彼此的作答。</p></div>';
+    '<div class="small" id="netJoined" style="margin-top:.5rem">' + joinedSummary() + '</div>' +
+    '<p class="small" style="text-align:left;margin:.3rem 0 0">學生進來要先輸入學號或姓名。只有知道代碼和密碼的人能加入；改密碼後已加入的學生要重新輸入。學生之間看不到彼此的作答。</p></div>';
 }
 function netPaint(){
   updChips();
@@ -528,6 +531,7 @@ function netPaint(){
   const dot = $('netDot'), cnt = $('netCnt');
   if (dot) dot.className = 'dot ' + (NET.status === 'on' ? 'on' : NET.status === 'off' ? 'bad' : '');
   if (cnt) cnt.textContent = NET.status === 'on' ? studentCount() + ' 人' : '連線中⋯';
+  updJoined();
   if (S.tab === 'vote') votePaint();
   if (S.tab === 'buzz') bzPaint();
 }
@@ -545,7 +549,7 @@ function drawQR(el, size){
 
 /* ---------- 🗳 即時投票（老師端） ---------- */
 let voteSaveT = 0;
-function saveVote(){ const v = Object.assign({}, S.vote, {cur:null}); saveVote(); ssSet('vcur', JSON.stringify(S.vote.cur)); if (NET.code && NET.role === 'T') lsPut('vcur.' + NET.code, S.vote.cur); }
+function saveVote(){ const v = Object.assign({}, S.vote, {cur:null}); lsPut('vote', v); ssSet('vcur', JSON.stringify(S.vote.cur)); if (NET.code && NET.role === 'T') lsPut('vcur.' + NET.code, S.vote.cur); }
 function saveVoteSoon(){ clearTimeout(voteSaveT); voteSaveT = setTimeout(saveVote, 400); }
 function labelsOf(p){ const T2 = VOTE_TYPES[p.type]; return T2.labels ? T2.labels.slice() : p.opts.slice(); }
 function marksOf(p){ const T2 = VOTE_TYPES[p.type]; return T2.marks ? T2.marks.slice() : LETTERS.slice(0, p.n).split(''); }
@@ -558,6 +562,33 @@ function tally(p){
   return {c, voters:voters + (p.type === 'm' ? Math.max(0, ...man) : manSum)};
 }
 const cleanStu = (v) => cut(String(v || '').toUpperCase().replace(/[^A-Z0-9-]/g, ''), 12);
+function resolveWho(w){
+  const r = roster(), ids = r.ids || {}, up = cleanStu(w);
+  for (const n of r.list) if (ids[n] && cleanStu(ids[n]) === up && up) return {key:cleanStu(ids[n]), sid:ids[n], name:n};
+  const n = r.list.find((x) => x === w || x.replace(/\(\d+\)$/, '') === w);
+  if (n) return {key:ids[n] ? cleanStu(ids[n]) : 'N:' + n, sid:ids[n] || '', name:n};
+  return {key:'?:' + w, sid:/\d/.test(w) ? w : '', name:'', raw:w};
+}
+const whoLabel = (w) => { const x = resolveWho(w); return x.name ? disp(x.name) : w; };
+function joinedList(){ const out = []; NET.peers.forEach((nm, id) => { if (/^T\|/.test(nm)) return; const w = NET.who.get(id); out.push({id, who:w || '', x:w ? resolveWho(w) : null}); }); return out; }
+function updJoined(){ const el = $('netJoined'); if (el) el.innerHTML = joinedSummary(); }
+function joinedSummary(){ if (!NET.want) return ''; const L = joinedList(), inRoster = new Set(L.filter((o) => o.x && o.x.name).map((o) => o.x.name)); return '👥 已加入 ' + L.length + ' 人（名單內 ' + inRoster.size + ' / ' + roster().list.length + '）<button class="ib" data-act="joinedList" style="min-height:1.9rem;margin-left:.3rem">看名單</button>'; }
+function openJoined(){
+  const L = joinedList(), here = new Set(), r = roster();
+  const known = L.filter((o) => o.x && o.x.name).map((o) => { here.add(o.x.name); return o; }), unknown = L.filter((o) => !o.x || !o.x.name), absent = r.list.filter((n) => !here.has(n));
+  const chip = (t, cls) => '<span class="nm' + (cls || '') + '" style="display:inline-block;margin:.15rem">' + esc(t) + '</span>';
+  openModal('<h2>👥 誰加入了（' + esc(r.name) + '）</h2><p class="small">比對目前選的班級名單（學號或姓名）。這份是即時連線狀態，學生關掉網頁就會離開。</p>' +
+    '<h3>✅ 已加入 ' + known.length + ' 人</h3><div>' + (known.map((o) => chip(disp(o.x.name), ' hit')).join('') || '<span class="small">還沒有</span>') + '</div>' +
+    (unknown.length ? '<h3 style="margin-top:.7rem">❓ 名單外 ' + unknown.length + ' 人</h3><div>' + unknown.map((o) => chip(o.who || '（還沒輸入）')).join('') + '</div><p class="small">可能打錯字、用了別的稱呼，或不是這班的人。</p>' : '') +
+    '<h3 style="margin-top:.7rem">⬜ 還沒加入 ' + absent.length + ' 人</h3><div>' + (absent.map((n) => chip(disp(n), ' out')).join('') || '<span class="small">全到了 🎉</span>') + '</div>' +
+    '<div class="stack"><button class="btn alt" data-act="joinedCsv">⬇ 下載點名 CSV</button><button class="btn" data-act="close">關閉</button></div>', true);
+}
+function joinedCsv(){
+  const L = joinedList(), r = roster(), here = {}; L.forEach((o) => { if (o.x && o.x.name) here[o.x.name] = o.who; });
+  const t = new Date().toLocaleString('zh-TW', {hour12:false});
+  const rows = [['學號', '姓名', '狀態', '學生輸入', '時間']].concat(r.list.map((n) => [(r.ids || {})[n] || '', n, here[n] != null ? '已加入' : '未加入', here[n] || '', t]), L.filter((o) => !o.x || !o.x.name).map((o) => ['', '', '名單外', o.who, t]));
+  download(r.name + '點名-' + new Date().toLocaleDateString('sv') + '.csv', TCHIO.csvText(rows), 'text/csv');
+}
 function teacherVoteName(p){ return 'T|v|' + p.pid + '|' + p.n + '|' + (p.named ? p.type.toUpperCase() : p.type) + '|' + (p.state === 'open' ? 'o' : 'c') + '|' + (p.state === 'open' ? '' : p.ans || ''); }
 function renderVote(){
   const v = S.vote, p = v.cur, ty = v.type;
@@ -633,7 +664,7 @@ function archivePoll(){
 const myPolls = () => { const id = roster().id; return S.polls.filter((h) => !h.rid || h.rid === id); };
 function pollRecord(p){
   const {c, voters} = tally(p), answers = {};
-  if (p.named) Object.keys(p.votes).forEach((id) => { const s = p.who && p.who[id]; if (s) answers[s] = p.votes[id]; });
+  if (p.named) Object.keys(p.votes).forEach((id) => { const w = p.who && p.who[id]; if (w) answers[w] = p.votes[id]; });
   return {q:p.q, type:VOTE_TYPES[p.type].n, t:p.type, labels:labelsOf(p), c, voters, ans:p.ans ? p.ans.split('').map((L) => labelsOf(p)[LETTERS.indexOf(L)]).join('、') : '', ansL:p.ans || '', named:!!p.named, answers, at:p.at};
 }
 // 成績：記名計分＋有設答案的題目（含目前這題），每位學生一列；姓名用目前班級名單的學號對應
@@ -641,13 +672,17 @@ function scoreRows(){
   S.polls = lsJson('polls', S.polls); const qs = myPolls().filter((h) => h.named && h.ansL); const cur = S.vote.cur;
   if (cur && cur.named && cur.ans) qs.push(pollRecord(cur));
   if (!qs.length) return null;
-  const r = roster(), nameOf = {}; Object.keys(r.ids || {}).forEach((n) => { nameOf[cleanStu(r.ids[n])] = n; });
-  const stus = Object.keys(nameOf); qs.forEach((h) => Object.keys(h.answers || {}).forEach((x) => { if (stus.indexOf(x) < 0) stus.push(x); }));
+  // answers 的 key 是學生輸入的學號或姓名；依目前名單對應成同一個人（舊紀錄是學號）
+  const r = roster(), people = {};
+  r.list.forEach((n) => { const sid = (r.ids || {})[n] || ''; people[sid ? cleanStu(sid) : 'N:' + n] = {sid, name:n}; });
+  const qa = qs.map((h) => { const m = {}; Object.keys(h.answers || {}).forEach((w) => { const x = resolveWho(w); if (!people[x.key]) people[x.key] = {sid:x.sid, name:'', raw:w}; m[x.key] = h.answers[w]; }); return m; });
+  const stus = Object.keys(people);
   const show = (h, a) => h.t === 't' ? a.replace('A', 'O').replace('B', 'X') : a;
   const body = stus.map((x) => {
     let ok = 0, done = 0;
-    const cells = qs.map((h) => { const a = (h.answers || {})[x]; if (!a) return '未作答'; done++; if (a === h.ansL) { ok++; return '✔ ' + show(h, a); } return '✘ ' + show(h, a); });
-    return {x, row:[x, nameOf[x] || '（名單沒有這個學號）'].concat(cells, [ok, done, qs.length, Math.round(ok / qs.length * 100)]), ok};
+    const cells = qs.map((h, qi) => { const a = qa[qi][x]; if (!a) return '未作答'; done++; if (a === h.ansL) { ok++; return '✔ ' + show(h, a); } return '✘ ' + show(h, a); });
+    const pp = people[x];
+    return {x, row:[pp.sid, pp.name || '（名單外：' + pp.raw + '）'].concat(cells, [ok, done, qs.length, Math.round(ok / qs.length * 100)]), ok};
   }).sort((a, b) => b.ok - a.ok || (a.x > b.x ? 1 : -1)).map((o) => o.row);
   const rows = [['學號', '姓名'].concat(qs.map((_, i) => '第 ' + (i + 1) + ' 題'), ['答對題數', '作答題數', '總題數', '得分（百分制）'])].concat(body);
   rows.push([], ['題號', '題目', '正確答案', '答對人數', '作答人數', '答對率']);
@@ -706,8 +741,11 @@ function pollCsv(){
 }
 
 /* ---------- 學生手機頁 ---------- */
-const JS = {tid:'', name:'', qtext:{}, otext:{}, picks:'', nick:lsGet('nick') || '', stuno:lsGet('stuno') || '', named:false};
-function voteSend(pid, L){ const n = 'S|' + pid + '|' + L + (JS.named ? '|' + JS.stuno : ''); if (n.length > 24) { toast('學號太長或選太多項，送不出去'); return false; } myName(n); return true; }
+const cleanWho = (v) => cut(String(v || '').replace(/[|<>\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim(), 12);
+const JS = {tid:'', name:'', qtext:{}, otext:{}, picks:'', who:cleanWho(lsGet('who') || lsGet('stuno') || ''), named:false};
+// 學生狀態代碼最後一段一律帶學號／姓名：W|誰、S|題號|選項|誰、B|輪次|誰
+const withWho = (n) => { const a = String(n || 'W').split('|'); const k = a[0] === 'S' ? 3 : a[0] === 'B' ? 2 : 1; a.length = Math.max(a.length, k); a[k] = JS.who; return a.slice(0, k + 1).join('|'); };
+function voteSend(pid, L){ const n = 'S|' + pid + '|' + L + '|' + JS.who; if (n.length > 24) { toast('名字太長或選太多項，送不出去'); return false; } myName(n); return true; }
 function onChat(m){
   if (!m || !m.text) return;
   const tName = NET.peers.get(m.id);
@@ -729,6 +767,13 @@ function renderJoin(){
       '<form class="codeIn" id="pwForm"><input class="tx" id="pwIn" maxlength="8" autocomplete="off" autocapitalize="characters" aria-label="教室密碼"><button class="btn y">進入</button></form>' + (NET.pw ? '<p class="jWait" style="font-size:1rem">密碼不對，請再看一次大螢幕。</p>' : '') + '</div>' + joinFoot() + '</div>';
     return;
   }
+  if (!JS.who || JS.whoEdit) {
+    root.innerHTML = '<div class="join"><div class="jHead"><div class="brand"><img src="icons/icon-192.png" alt=""><span>課堂小幫手</span></div><div class="r"><span class="dot ' + (NET.status === 'on' ? 'on' : 'bad') + '"></span>' + NET.code + '</div></div><div class="jMain"><div class="jQ">👤 請輸入學號或姓名</div>' +
+      '<form class="codeIn" id="whoForm"><input class="tx" id="whoIn" maxlength="12" autocomplete="off" value="' + esc(JS.who) + '" placeholder="例：410012345／王小明" style="letter-spacing:0;font-size:1.3rem;text-transform:none" aria-label="學號或姓名"><button class="btn y">進入</button></form>' +
+      '<p class="jWait" style="font-size:1rem">老師用來辨識你、點名；搶答時大螢幕會顯示。</p></div>' + joinFoot() + '</div>';
+    setTimeout(() => { const el = $('whoIn'); if (el) el.focus(); }, 50);
+    return;
+  }
   const ts = teacherState(), on = NET.status === 'on';
   let body = '';
   if (!on) body = '<div class="jWait"><span class="big">📡</span>連線中⋯</div>';
@@ -736,20 +781,19 @@ function renderJoin(){
   else if (ts[1] === 'v') body = joinVote(ts);
   else if (ts[1] === 'b') body = joinBuzz(ts);
   else body = '<div class="jWait"><span class="big">🙂</span>已加入，等老師出題</div>';
-  root.innerHTML = '<div class="join"><div class="jHead"><div class="brand"><img src="icons/icon-192.png" alt=""><span>課堂小幫手</span></div><div class="r"><span class="dot ' + (on ? 'on' : 'bad') + '"></span>' + NET.code + '</div></div><div class="jMain">' + body + '</div>' + joinFoot() + '</div>';
+  root.innerHTML = '<div class="join"><div class="jHead"><div class="brand"><img src="icons/icon-192.png" alt=""><span>課堂小幫手</span></div><div class="r"><button class="ib" data-act="whoEdit" style="min-height:1.9rem;font-size:.8rem">👤 ' + esc(JS.who) + ' ✎</button><span class="dot ' + (on ? 'on' : 'bad') + '"></span>' + NET.code + '</div></div><div class="jMain">' + body + '</div>' + joinFoot() + '</div>';
 }
-function joinFoot(){ return '<div class="jFoot">' + (JS.named ? '記名計分：老師會看到你的學號與答案。' : '匿名作答：老師畫面不會顯示誰選了什麼。') + '<br><a href="./">講師課堂小幫手</a>・<a href="manual.html">說明</a>・<button class="ib" style="min-height:0;padding:0;background:none;color:var(--r);text-decoration:underline" data-act="warn">⚠ 使用警語</button></div>'; }
+function joinFoot(){ return '<div class="jFoot">' + (JS.named ? '記名計分：老師會看到你的答案並計分。' : '老師知道你有加入，但大螢幕不會顯示誰選了什麼。') + '<br><a href="./">講師課堂小幫手</a>・<a href="manual.html">說明</a>・<button class="ib" style="min-height:0;padding:0;background:none;color:var(--r);text-decoration:underline" data-act="warn">⚠ 使用警語</button></div>'; }
 function joinVote(ts){
   const tl = String(ts[4] || ''), named = /[A-Z]/.test(tl), pid = ts[2], n = clamp(+ts[3] || 2, 2, 8), type = VOTE_TYPES[tl.toLowerCase()] ? tl.toLowerCase() : 's', open = ts[5] === 'o', ans = ts[6] || '';
   JS.named = named;
-  if (named && !JS.stuno) return '<div class="jQ">🏆 這題記名計分<br>請先輸入學號</div><form class="codeIn" id="stunoForm"><input class="tx" id="stunoIn" maxlength="12" autocomplete="off" inputmode="text" aria-label="學號"><button class="btn y">好了</button></form><p class="jFoot">老師會看到你的學號和答案，用來計算成績。</p>';
   const mine = JS.name.split('|'), voted = mine[0] === 'S' && mine[1] === pid ? mine[2] : '';
   if (JS.pid !== pid) { JS.pid = pid; JS.picks = voted; }
   const T2 = VOTE_TYPES[type]; let labels = T2.labels ? T2.labels.slice() : null;
   if (!labels) { const parts = (JS.otext[pid] || []); labels = []; let ok = true; for (let i = 0; i < parts.length; i++) { if (parts[i] == null) { ok = false; break; } } if (ok && parts.length) labels = parts.join(' ｜ ').split(' ｜ '); }
   const marks = T2.marks || LETTERS.split('');
   const q = JS.qtext[pid];
-  let h = (named ? '<p class="jFoot" style="margin:0">🏆 記名計分・學號 ' + esc(JS.stuno) + ' <button class="ib" data-act="stunoEdit" style="min-height:1.8rem;font-size:.75rem">改學號</button></p>' : '') + '<div class="jQ">' + (q ? esc(q) : '請看大螢幕的題目') + '</div>';
+  let h = (named ? '<p class="jFoot" style="margin:0">🏆 這題記名計分</p>' : '') + '<div class="jQ">' + (q ? esc(q) : '請看大螢幕的題目') + '</div>';
   if (!open && ans) {
     const ok = voted && voted === ans.split('').sort().join('');
     h += '<div class="result ' + (ok ? 'ok' : 'no') + '">' + (!voted ? '這題你沒有作答' : ok ? '🎉 答對了！' : '再接再厲！') + '</div><p class="jWait" style="font-size:1.1rem">答案：' + ans.split('').map((L) => esc(marks[LETTERS.indexOf(L)] + ' ' + (labels[LETTERS.indexOf(L)] || ''))).join('、') + '</p>';
@@ -762,9 +806,8 @@ function joinVote(ts){
 }
 function joinBuzz(ts){
   const rid = ts[2], phase = ts[3];
-  if (!JS.nick) return '<div class="jQ">🔔 搶答！先輸入名字或組別</div><form class="codeIn" id="nickForm"><input class="tx" id="nickIn" maxlength="12" placeholder="例：小明／第 3 組" style="letter-spacing:0;font-size:1.3rem;text-transform:none"><button class="btn y">好了</button></form><p class="jFoot">大螢幕會顯示這個名字。</p>';
   const mine = JS.name.split('|'), pressed = mine[0] === 'B' && mine[1] === rid;
-  let h = '<div class="jQ">' + esc(JS.nick) + ' <button class="ib" data-act="nickEdit" style="min-height:2rem;font-size:.8rem">改名</button></div>';
+  let h = '<div class="jQ">🔔 搶答</div>';
   if (pressed) h += '<div class="jWait"><span class="big">🙋</span>已按下！看大螢幕</div>';
   else if (phase === 'o') h += '<button class="bigBuzz" data-act="buzz">搶！</button>';
   else if (phase === 'p') h += '<button class="bigBuzz" disabled>準備</button><p class="jWait">倒數中，先別按⋯</p>';
@@ -850,6 +893,7 @@ document.addEventListener('click', (e) => {
     netOff: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定中斷？'; return; } netStop(); },
     netNew: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定換？學生要重新掃'; return; } netStop(); netStart(newCode()); renderTool(); },
     qrBig: () => { openModal('<div class="qrBig"><h2>📱 掃描加入</h2><div class="qr" id="qrModal"></div><div class="joinCode" style="font-size:3.4rem">' + NET.code + '</div><div class="joinUrl">' + esc(joinUrl(NET.code)) + '</div><button class="btn" data-act="close">關閉</button></div>', true); drawQR($('qrModal'), Math.min(420, innerWidth - 90, innerHeight - 280)); },
+    joinedList: openJoined, joinedCsv,
     copyJoin: () => copyText(joinUrl(NET.code)),
     vStart, vClose: () => { const p = S.vote.cur; p.state = 'closed'; saveVote(); setTeacher(teacherVoteName(p)); SND.pop(); votePaint(); },
     vReopen: () => { const p = S.vote.cur; p.state = 'open'; saveVote(); setTeacher(teacherVoteName(p)); votePaint(); },
@@ -869,9 +913,9 @@ document.addEventListener('click', (e) => {
     bankNext: () => { const used = new Set(S.bank.used), i = S.bank.items.findIndex((_, k) => !used.has(k)); if (i >= 0) bankStart(i); },
     bankReset: () => { S.bank.used = []; lsPut('bank', S.bank); renderVote(); },
     bankClear: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定清空題庫？'; return; } S.bank = {name:'', items:[], used:[]}; lsPut('bank', S.bank); renderVote(); },
-    stunoEdit: () => { JS.stuno = ''; lsDel('stuno'); renderJoin(); },
-    buzz: () => { const ts = teacherState(); if (!ts || ts[1] !== 'b' || ts[3] !== 'o') return; myName('B|' + ts[2] + '|' + JS.nick); if (navigator.vibrate) navigator.vibrate(60); renderJoin(); },
-    nickEdit: () => { JS.nick = ''; lsDel('nick'); renderJoin(); },
+    whoEdit: () => { JS.whoEdit = true; renderJoin(); },
+    buzz: () => { const ts = teacherState(); if (!ts || ts[1] !== 'b' || ts[3] !== 'o') return; myName('B|' + ts[2] + '|' + JS.who); if (navigator.vibrate) navigator.vibrate(60); renderJoin(); },
+
     sndTest: () => SND.win(),
     foldAll: () => { const ds = document.querySelectorAll('.set-sec'), anyClosed = Array.from(ds).some((x) => !x.open); ds.forEach((x) => { x.open = anyClosed; }); saveFold(); },
     backup, restore: () => $('restoreFile').click(),
@@ -907,8 +951,7 @@ document.addEventListener('submit', (e) => {
   e.preventDefault();
   if (e.target.id === 'codeForm') { const c = $('codeIn').value.toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!/^[A-Z0-9]{6}$/.test(c)) { toast('代碼是 6 個英文或數字'); return; } history.replaceState(null, '', '?join=' + c + (QS.get('presence') ? '&presence=' + encodeURIComponent(QS.get('presence')) : '')); joinStart(c); }
   if (e.target.id === 'pwForm') { const v = $('pwIn').value.toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!v) { toast('請輸入密碼'); return; } NET.pw = v; lsSet('spw.' + NET.code, v); JS.pwNeed = false; renderJoin(); netReconnect(); return; }
-  if (e.target.id === 'stunoForm') { const n = $('stunoIn').value.toUpperCase().replace(/[^A-Z0-9-]/g, ''); if (!n) { toast('請輸入學號（英文、數字）'); return; } JS.stuno = n.slice(0, 12); lsSet('stuno', JS.stuno); renderJoin(); }
-  if (e.target.id === 'nickForm') { const n = $('nickIn').value.replace(/[|<>\u0000-\u001f]/g, '').trim(); if (!n) { toast('請輸入名字或組別'); return; } JS.nick = cut(n, 12); lsSet('nick', JS.nick); renderJoin(); }
+  if (e.target.id === 'whoForm') { const n = cleanWho($('whoIn').value); if (!n) { toast('請輸入學號或姓名'); return; } JS.who = n; JS.whoEdit = false; lsSet('who', n); myName(withWho(JS.name)); renderJoin(); }
 });
 document.addEventListener('keydown', (e) => {
   if (JOIN || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -945,7 +988,7 @@ function initMarquee(){
 /* ---------- 啟動 ---------- */
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); window._dp = e; });
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('service-worker.js').catch(() => {});
-function joinStart(code){ JS.name = lsGet('my.' + code) || 'W'; const pw = String(QS.get('pw') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8); if (pw) lsSet('spw.' + code, pw); netStart(code); renderJoin(); }
+function joinStart(code){ JS.name = withWho(lsGet('my.' + code) || 'W'); const pw = String(QS.get('pw') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8); if (pw) lsSet('spw.' + code, pw); netStart(code); renderJoin(); }
 applyPref(); initMarquee();
 if (JOIN) {
   document.title = '課堂小幫手・學生作答';
