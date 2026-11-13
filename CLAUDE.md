@@ -4,7 +4,7 @@
 
 - 純靜態：`index.html`（CSS＋外殼）＋`app.js`（全部邏輯）＋`manual.html`＋PWA。無框架、無建置。
 - 本機預覽 port **8875**（`.claude/launch.json` 的 `teacher-classroom-helper`）。visitor-badge `m255525.teacherclassroomhelper`。
-- 部署：`.github/workflows/pages.yml`（push master 自動部署）。**尚未上線**——上線前先問使用者（repo 由使用者自己 `gh repo create`）。預定網址 `https://m255525.github.io/teacher-classroom-helper/`（寫死在 `app.js` 的 `ONLINE`，QR code 在非 github.io 網址時一律指向它）。
+- 部署：`.github/workflows/pages.yml`（push master 自動部署）。**2026-11-13 已上線** <https://m255525.github.io/teacher-classroom-helper/>（repo 由使用者自己 `gh repo create`；第一次 push 時 Pages 還沒開，run 失敗，開 Pages 後 rerun 成功）。網址（寫死在 `app.js` 的 `ONLINE`，QR code 在非 github.io 網址時一律指向它）。
 
 ## 手機連線（借用創業島轉播站，Worker 一行都沒改）
 - 連 `wss://startup-island-presence.content-workflow.workers.dev/ws?room=VOTE<6碼>`（10 字元，落在 Worker `ROOM` 規則 3～12 碼；創業島隨機房間是 6 碼、創作者小鎮用 CT 前綴，不會撞）。網址加 `?presence=ws://…` 可改連本機轉播站。
