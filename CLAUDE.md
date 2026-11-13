@@ -34,3 +34,9 @@
 - 記名計分：老師勾 `vote.named` → 狀態代碼題型字母改大寫（`T|v|pid|n|S|o|`）；學生手機先要求學號（`tch.stuno`），name 變 `S|pid|選項|學號`（總長 >24 會擋下提示）。老師端 `p.who{peerId:學號}`，`pollRecord()` 存 `answers{學號:選項}`、`ansL`。`scoreRows()`：記名＋有答案的題目（含目前這題），名單有學號的學生全列（沒作答 0 分），依答對數排序，下方附各題答對率。
 - 題目文字現在先送選項 `O…` 再送題目 `Q…`（手機按鈕要用選項文字）。
 - 測試：`node tools/test_io.mjs`（解析器）；瀏覽器用 python-docx／openpyxl 產的真檔案＋Big5 CSV 測過。
+
+## 多教室隔離（2026-11-13）
+- **每個分頁一個代碼**：目前代碼存 sessionStorage `tch.room`（重新整理保留），localStorage `room` 只當「上次用的代碼」。按「開放手機連線」時用 `BroadcastChannel('tch-room')` 問其他分頁有沒有在用（300ms），有就換新代碼；複製分頁（會連 sessionStorage 一起複製）載入時也會檢查，撞到就不自動連線。
+- 進行中的題目改存 sessionStorage `vcur`＋localStorage `vcur.<代碼>`（隔天開同代碼可接續）；`vote` 不再含 cur（`saveVote()`）。本機紀錄 `polls` 每筆多 `rid`（班級），寫入前先重讀避免兩分頁互蓋，紀錄卡、CSV、成績、清除都只看目前班級（`myPolls()`）。
+- **轉播站教室模式**（見創業島 CLAUDE.md「教室模式」）：連線都帶 `cls=1`；老師另帶 `tkey`（每個代碼一把，存 localStorage `tkey.<代碼>`），學生只看得到老師、看不到彼此作答。關閉碼：4001 金鑰不符 → 自動換新代碼；4003 密碼錯 → 學生端顯示密碼輸入框；4002 id 被占 → 換 id 重連。
+- **教室密碼**（選填，英數 ≤8，存 `pw.<代碼>`）：連線卡「設密碼」，QR／連結帶 `&pw=`，學生用代碼手動加入時才需要輸入（存 `spw.<代碼>`）。改密碼會重新連線，已加入的學生要重新輸入。

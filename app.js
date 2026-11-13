@@ -13,6 +13,11 @@ const lsSet = (k, v) => { try { localStorage.setItem(P + k, v); } catch (e) {} }
 const lsDel = (k) => { try { localStorage.removeItem(P + k); } catch (e) {} };
 const lsJson = (k, d) => { try { const v = JSON.parse(lsGet(k)); return v == null ? d : v; } catch (e) { return d; } };
 const lsPut = (k, o) => lsSet(k, JSON.stringify(o));
+// 每個分頁各自的資料（目前教室代碼、進行中的題目）：sessionStorage
+const ssGet = (k) => { try { return sessionStorage.getItem(P + k); } catch (e) { return null; } };
+const ssSet = (k, v) => { try { sessionStorage.setItem(P + k, v); } catch (e) {} };
+const ssDel = (k) => { try { sessionStorage.removeItem(P + k); } catch (e) {} };
+const ssJson = (k, d) => { try { const v = JSON.parse(ssGet(k)); return v == null ? d : v; } catch (e) { return d; } };
 const rnd = (n) => { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] % n; };
 const shuffle = (arr) => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = rnd(i + 1); const t = a[i]; a[i] = a[j]; a[j] = t; } return a; };
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -54,7 +59,7 @@ const S = {
   grp: Object.assign({mode:'n', n:4, size:4, leader:false, last:null}, lsJson('grp', {})),
   tset: Object.assign({mode:'down', total:300, beep:true}, lsJson('timer', {})),
   buzz: Object.assign({src:'local', count:4, teams:null}, lsJson('buzz', {})),
-  vote: Object.assign({type:'s', q:'', opts:'', cur:null}, lsJson('vote', {})),
+  vote: Object.assign({type:'s', q:'', opts:'', named:false}, lsJson('vote', {}), {cur:null}),
   polls: lsJson('polls', []),
   bank: Object.assign({name:'', items:[], used:[]}, lsJson('bank', {})),
 };
@@ -404,23 +409,44 @@ const NET = {ws:null, want:false, status:'off', code:'', role:'T', myId:randId()
 function studentCount(){ let n = 0; NET.peers.forEach((v) => { if (!/^T\|/.test(v)) n++; }); return n; }
 function joinUrl(code){
   const here = location.protocol === 'https:' && location.hostname === 'm255525.github.io';
-  return (here ? location.origin + location.pathname : ONLINE) + '?join=' + code;
+  return (here ? location.origin + location.pathname : ONLINE) + '?join=' + code + (NET.pw && code === NET.code ? '&pw=' + encodeURIComponent(NET.pw) : '');
 }
 function netStart(code){
-  NET.want = true; NET.code = code; NET.role = JOIN ? 'S' : 'T';
-  if (NET.role === 'T') lsSet('room', code);
-  else { NET.myId = lsGet('sid.' + code) || randId(); lsSet('sid.' + code, NET.myId); }
+  NET.want = true; NET.code = code; NET.role = JOIN ? 'S' : 'T'; NET.retry = 0;
+  if (NET.role === 'T') {
+    ssSet('room', code); lsSet('room', code); // 這個分頁的代碼＋「上次用的代碼」
+    NET.tkey = lsGet('tkey.' + code); if (!NET.tkey) { NET.tkey = randId() + randId(); lsSet('tkey.' + code, NET.tkey); }
+    NET.pw = lsGet('pw.' + code) || '';
+  } else { NET.myId = lsGet('sid.' + code) || randId(); lsSet('sid.' + code, NET.myId); NET.pw = lsGet('spw.' + code) || ''; JS.pwNeed = false; }
   netConnect(); updChips();
 }
+// 同一個瀏覽器的其他分頁：問「這個代碼有沒有人在用」
+const BC = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('tch-room') : null;
+if (BC) BC.onmessage = (e) => { const d = e.data || {}; if (d.q && !JOIN && NET.want && NET.role === 'T' && NET.code === d.q) BC.postMessage({busy:d.q}); };
+function codeBusy(code){
+  return new Promise((ok) => {
+    if (!BC || !code) { ok(false); return; }
+    const h = (e) => { if (e.data && e.data.busy === code) { BC.removeEventListener('message', h); ok(true); } };
+    BC.addEventListener('message', h); BC.postMessage({q:code}); setTimeout(() => { BC.removeEventListener('message', h); ok(false); }, 300);
+  });
+}
+async function netOpen(){
+  const last = ssGet('room') || lsGet('room');
+  const code = last && /^[A-Z0-9]{6}$/.test(last) && !(await codeBusy(last)) ? last : newCode();
+  if (last && code !== last) toast('上次的代碼正在另一個分頁使用，這個分頁改用新代碼');
+  netStart(code); renderTool();
+}
+function netReconnect(){ const ws = NET.ws; NET.ws = null; if (ws) try { ws.close(); } catch (e) {} NET.status = 'off'; NET.retry = 0; netConnect(); }
 function netStop(){
   NET.want = false; clearTimeout(NET.rt); const ws = NET.ws; NET.ws = null; NET.status = 'off'; NET.peers.clear();
   if (ws) try { ws.close(); } catch (e) {}
-  lsDel('room'); updChips(); if (S.tab === 'vote' || S.tab === 'buzz') renderTool();
+  ssDel('room'); updChips(); if (S.tab === 'vote' || S.tab === 'buzz') renderTool();
 }
 function netConnect(){
   if (!NET.want) return;
   let ws;
-  try { ws = new WebSocket(PRESENCE + (PRESENCE.indexOf('?') >= 0 ? '&' : '?') + 'room=VOTE' + NET.code); } catch (e) { netRetry(); return; }
+  const q = 'room=VOTE' + NET.code + '&cls=1' + (NET.role === 'T' ? '&tkey=' + NET.tkey : '') + (NET.pw ? '&pw=' + encodeURIComponent(NET.pw) : '');
+  try { ws = new WebSocket(PRESENCE + (PRESENCE.indexOf('?') >= 0 ? '&' : '?') + q); } catch (e) { netRetry(); return; }
   NET.ws = ws; NET.status = 'wait'; netPaint();
   ws.onopen = () => {
     if (NET.ws !== ws) return;
@@ -431,7 +457,14 @@ function netConnect(){
     netPaint();
   };
   ws.onmessage = (ev) => { if (NET.ws !== ws) return; let m; try { m = JSON.parse(ev.data); } catch (e) { return; } onNet(m); };
-  ws.onclose = () => { if (NET.ws !== ws) return; NET.status = 'off'; NET.ws = null; clearInterval(NET.ping); netPaint(); netRetry(); };
+  ws.onclose = (ev) => {
+    if (NET.ws !== ws) return; NET.status = 'off'; NET.ws = null; clearInterval(NET.ping);
+    const code = ev && ev.code;
+    if (code === 4003 && NET.role === 'S') { JS.pwNeed = true; NET.retry = 0; renderJoin(); return; } // 密碼不對：等學生輸入
+    if (code === 4001 && NET.role === 'T') { toast('這個代碼正由另一台電腦／瀏覽器當老師使用，已改用新代碼'); netStop(); netStart(newCode()); renderTool(); return; }
+    if (code === 4002) { NET.myId = randId(); if (NET.role === 'S') lsSet('sid.' + NET.code, NET.myId); }
+    netPaint(); netRetry();
+  };
   ws.onerror = () => {};
 }
 function netRetry(){ if (!NET.want) return; NET.retry++; clearTimeout(NET.rt); NET.rt = setTimeout(netConnect, Math.min(30000, 1500 * Math.pow(2, NET.retry - 1))); }
@@ -483,9 +516,11 @@ function netCard(){
   if (!NET.want) return '<div class="card joinCard"><h3>📱 手機連線</h3><p class="small" style="text-align:left">開放後會產生 6 碼代碼和 QR code，學生用手機掃描就能投票、搶答，不用下載 App、不用登入。</p><button class="btn y" data-act="netOn">📱 開放手機連線</button></div>';
   const url = joinUrl(NET.code), local = !/github\.io$/.test(location.hostname);
   return '<div class="card joinCard"><h3><span class="dot ' + (NET.status === 'on' ? 'on' : NET.status === 'off' ? 'bad' : '') + '" id="netDot"></span> 手機連線<span class="r" id="netCnt">' + (NET.status === 'on' ? studentCount() + ' 人' : '連線中⋯') + '</span></h3>' +
-    '<div class="small">代碼</div><div class="joinCode">' + NET.code + '</div><div class="qr" id="qrSide"></div><div class="joinUrl">' + esc(url) + '</div>' +
+    '<div class="small">代碼</div><div class="joinCode">' + NET.code + '</div>' + (NET.pw ? '<div class="small">🔒 密碼 <b style="font-size:1.3rem;color:var(--y);letter-spacing:.1em">' + esc(NET.pw) + '</b>（掃 QR code 會自動帶入）</div>' : '') + '<div class="qr" id="qrSide"></div><div class="joinUrl">' + esc(url) + '</div>' +
     (local ? '<p class="small" style="text-align:left">目前不是線上版網址，QR code 指向線上版：' + esc(ONLINE) + '</p>' : '') +
-    '<div class="row c" style="margin-top:.5rem"><button class="btn alt" data-act="qrBig">🔍 放大 QR</button><button class="btn alt" data-act="copyJoin">🔗 複製連結</button><button class="btn alt" data-act="netNew">換代碼</button><button class="btn alt" data-act="netOff">中斷</button></div></div>';
+    '<div class="row c" style="margin-top:.5rem"><button class="btn alt" data-act="qrBig">🔍 放大 QR</button><button class="btn alt" data-act="copyJoin">🔗 複製連結</button><button class="btn alt" data-act="netNew">換代碼</button><button class="btn alt" data-act="netOff">中斷</button></div>' +
+    '<div class="row c" style="margin-top:.5rem"><input class="tx" id="netPw" maxlength="8" placeholder="教室密碼（選填）" value="' + esc(NET.pw) + '" style="width:9.5rem;text-transform:uppercase" aria-label="教室密碼"><button class="btn alt" data-act="netPw">🔒 ' + (NET.pw ? '改密碼' : '設密碼') + '</button></div>' +
+    '<p class="small" style="text-align:left;margin:.3rem 0 0">只有知道代碼和密碼的人能加入；改密碼後已加入的學生要重新輸入。學生之間看不到彼此的作答。</p></div>';
 }
 function netPaint(){
   updChips();
@@ -510,7 +545,8 @@ function drawQR(el, size){
 
 /* ---------- 🗳 即時投票（老師端） ---------- */
 let voteSaveT = 0;
-function saveVoteSoon(){ clearTimeout(voteSaveT); voteSaveT = setTimeout(() => lsPut('vote', S.vote), 400); }
+function saveVote(){ const v = Object.assign({}, S.vote, {cur:null}); saveVote(); ssSet('vcur', JSON.stringify(S.vote.cur)); if (NET.code && NET.role === 'T') lsPut('vcur.' + NET.code, S.vote.cur); }
+function saveVoteSoon(){ clearTimeout(voteSaveT); voteSaveT = setTimeout(saveVote, 400); }
 function labelsOf(p){ const T2 = VOTE_TYPES[p.type]; return T2.labels ? T2.labels.slice() : p.opts.slice(); }
 function marksOf(p){ const T2 = VOTE_TYPES[p.type]; return T2.marks ? T2.marks.slice() : LETTERS.slice(0, p.n).split(''); }
 function tally(p){
@@ -534,7 +570,7 @@ function renderVote(){
     '<div class="row" style="margin-top:.6rem"><button class="btn y" data-act="vStart">▶ 開始投票</button></div>' +
     '<p class="small" style="margin:.5rem 0 0">題目會同步顯示在學生手機上（太長會截短，完整題目看大螢幕）。</p></div>' +
     bankCard() + scoreCard() +
-    '<div class="card"><h3>🗂 本機紀錄<span class="r">' + S.polls.length + ' 題</span></h3>' + (S.polls.length ? '<ul class="hist">' + S.polls.slice().reverse().slice(0, 30).map((h) => '<li><b>' + esc(h.q || '（未填題目）') + '</b><span class="small">' + esc(h.at) + '・' + h.voters + ' 人作答・' + h.labels.map((l, i) => l + ' ' + h.c[i]).join('、') + '</span></li>').join('') + '</ul><div class="row" style="margin-top:.5rem"><button class="btn alt" data-act="vCsv">⬇ 匯出 CSV</button><button class="btn alt" data-act="vClearHist">清除紀錄</button></div>' : '<p class="small">每題結束（按「下一題」）會存一筆。</p>') + '</div>' +
+    '<div class="card"><h3>🗂 本機紀錄（' + esc(cut(roster().name, 10)) + '）<span class="r">' + myPolls().length + ' 題</span></h3>' + (myPolls().length ? '<ul class="hist">' + myPolls().slice().reverse().slice(0, 30).map((h) => '<li><b>' + esc(h.q || '（未填題目）') + '</b><span class="small">' + esc(h.at) + '・' + h.voters + ' 人作答・' + h.labels.map((l, i) => l + ' ' + h.c[i]).join('、') + '</span></li>').join('') + '</ul><div class="row" style="margin-top:.5rem"><button class="btn alt" data-act="vCsv">⬇ 匯出 CSV</button><button class="btn alt" data-act="vClearHist">清除紀錄</button></div>' : '<p class="small">每題結束（按「下一題」）會存一筆。</p>') + '</div>' +
     '</aside></section>';
   lastStageKey = ''; votePaint(); drawQR($('qrSide'), 170);
 }
@@ -542,10 +578,10 @@ let lastStageKey = '';
 function votePaint(){
   const st = $('vStage'); if (!st) return; const p = S.vote.cur;
   if (!p) {
-    const k = 'idle' + NET.want + NET.code;
+    const k = 'idle' + NET.want + NET.code + NET.pw;
     if (lastStageKey !== k || !st.firstChild) {
       lastStageKey = k;
-      st.innerHTML = NET.want ? '<div class="qrBig" style="flex:1 1 auto;justify-content:center"><div class="voteQ">📱 拿出手機，掃描加入</div><div class="qr" id="qrStage"></div><div class="joinCode" style="font-size:clamp(2.4rem,6vw,4.5rem)">' + NET.code + '</div><div class="small">或打開 ' + esc(ONLINE.replace('https://', '')) + ' 輸入代碼</div><div class="drawHint" id="vIdleCnt"></div></div>'
+      st.innerHTML = NET.want ? '<div class="qrBig" style="flex:1 1 auto;justify-content:center"><div class="voteQ">📱 拿出手機，掃描加入</div><div class="qr" id="qrStage"></div><div class="joinCode" style="font-size:clamp(2.4rem,6vw,4.5rem)">' + NET.code + '</div>' + (NET.pw ? '<div class="drawHint">🔒 密碼 <b style="color:var(--y)">' + esc(NET.pw) + '</b></div>' : '') + '<div class="small">或打開 ' + esc(ONLINE.replace('https://', '')) + ' 輸入代碼</div><div class="drawHint" id="vIdleCnt"></div></div>'
         : '<div class="drawBox"><span class="drawHint">右邊出一題，按「開始投票」<br><small style="font-size:.7em">先「開放手機連線」學生就能用手機作答；沒有網路也可以用「✋ 舉手計票」</small></span></div>';
       drawQR($('qrStage'), 260);
     }
@@ -586,14 +622,15 @@ function vStart(item){
   const n = v.type === 's' || v.type === 'm' ? opts.length : VOTE_TYPES[v.type].labels.length;
   v.cur = {pid:pid4(), type:v.type, q:v.q, opts, n, state:'open', show:true, ans:'', votes:{}, manual:Array(n).fill(0), manualOn:!NET.want, named:!!v.named, who:{}, at:new Date().toLocaleString('zh-TW', {hour12:false})};
   if (item && item.ans) v.cur.ans = item.ans;
-  lsPut('vote', v);
+  saveVote();
   if (NET.want) { NET.q = []; setTeacher(teacherVoteName(v.cur)); queueChats(pollChats(v.cur)); }
   SND.go(); lastStageKey = ''; renderVote();
 }
 function archivePoll(){
   const p = S.vote.cur; if (!p) return; const {c, voters} = tally(p);
-  if (voters || c.some(Boolean)) { S.polls.push(pollRecord(p)); if (S.polls.length > 100) S.polls.shift(); lsPut('polls', S.polls); }
+  if (voters || c.some(Boolean)) { S.polls = lsJson('polls', []); S.polls.push(Object.assign(pollRecord(p), {rid:roster().id})); if (S.polls.length > 300) S.polls.shift(); lsPut('polls', S.polls); } // 先讀最新的，別蓋掉其他分頁寫的
 }
+const myPolls = () => { const id = roster().id; return S.polls.filter((h) => !h.rid || h.rid === id); };
 function pollRecord(p){
   const {c, voters} = tally(p), answers = {};
   if (p.named) Object.keys(p.votes).forEach((id) => { const s = p.who && p.who[id]; if (s) answers[s] = p.votes[id]; });
@@ -601,7 +638,7 @@ function pollRecord(p){
 }
 // 成績：記名計分＋有設答案的題目（含目前這題），每位學生一列；姓名用目前班級名單的學號對應
 function scoreRows(){
-  const qs = S.polls.filter((h) => h.named && h.ansL); const cur = S.vote.cur;
+  S.polls = lsJson('polls', S.polls); const qs = myPolls().filter((h) => h.named && h.ansL); const cur = S.vote.cur;
   if (cur && cur.named && cur.ans) qs.push(pollRecord(cur));
   if (!qs.length) return null;
   const r = roster(), nameOf = {}; Object.keys(r.ids || {}).forEach((n) => { nameOf[cleanStu(r.ids[n])] = n; });
@@ -664,7 +701,7 @@ const BANK_TPL = [['題目', '選項A', '選項B', '選項C', '選項D', '答案
 function pollCsv(){
   const q = (s) => '"' + String(s).replace(/"/g, '""') + '"';
   const rows = [['時間', '題目', '題型', '選項', '票數', '作答人數', '正確答案'].map(q).join(',')];
-  S.polls.forEach((h) => h.labels.forEach((l, i) => rows.push([h.at, h.q, h.type, l, h.c[i], h.voters, h.ans].map(q).join(','))));
+  myPolls().forEach((h) => h.labels.forEach((l, i) => rows.push([h.at, h.q, h.type, l, h.c[i], h.voters, h.ans].map(q).join(','))));
   return '﻿' + rows.join('\r\n');
 }
 
@@ -685,6 +722,11 @@ function renderJoin(){
   if (!NET.want) {
     root.innerHTML = '<div class="join"><div class="jHead"><div class="brand"><img src="icons/icon-192.png" alt=""><span>課堂小幫手</span></div></div><div class="jMain"><div class="jQ">輸入老師給的 6 碼代碼</div>' +
       '<form class="codeIn" id="codeForm"><input class="tx" id="codeIn" maxlength="6" autocomplete="off" autocapitalize="characters" inputmode="text" aria-label="代碼"><button class="btn y">加入</button></form></div>' + joinFoot() + '</div>';
+    return;
+  }
+  if (JS.pwNeed) {
+    root.innerHTML = '<div class="join"><div class="jHead"><div class="brand"><img src="icons/icon-192.png" alt=""><span>課堂小幫手</span></div><div class="r"><span class="dot bad"></span>' + NET.code + '</div></div><div class="jMain"><div class="jQ">🔒 這間教室要密碼</div>' +
+      '<form class="codeIn" id="pwForm"><input class="tx" id="pwIn" maxlength="8" autocomplete="off" autocapitalize="characters" aria-label="教室密碼"><button class="btn y">進入</button></form>' + (NET.pw ? '<p class="jWait" style="font-size:1rem">密碼不對，請再看一次大螢幕。</p>' : '') + '</div>' + joinFoot() + '</div>';
     return;
   }
   const ts = teacherState(), on = NET.status === 'on';
@@ -782,7 +824,7 @@ document.addEventListener('click', (e) => {
   if (d.bsrc) { S.buzz.src = d.bsrc; lsPut('buzz', S.buzz); bzReset(); renderTool(); return; }
   if (d.hit != null) { bzHit(+d.hit); return; }
   if (d.sc != null) { const tm = S.buzz.teams[+d.sc]; tm.s = clamp(tm.s + (+d.d), -99, 999); lsPut('buzz', S.buzz); bzPaint(); return; }
-  if (d.vtype) { const v = S.vote; if ($('vQ')) v.q = $('vQ').value; if ($('vOpts')) v.opts = $('vOpts').value; v.type = d.vtype; lsPut('vote', v); renderVote(); return; }
+  if (d.vtype) { const v = S.vote; if ($('vQ')) v.q = $('vQ').value; if ($('vOpts')) v.opts = $('vOpts').value; v.type = d.vtype; saveVote(); renderVote(); return; }
   if (d.man != null) { const p = S.vote.cur; if (!p) return; p.manual[+d.man] = Math.max(0, (p.manual[+d.man] || 0) + (+d.d)); saveVoteSoon(); votePaint(); return; }
   if (d.vote) { joinPick(d.vote); return; }
   if (d.bank != null) { bankStart(+d.bank); return; }
@@ -803,21 +845,22 @@ document.addEventListener('click', (e) => {
     tGo: tToggle, tReset, tAdd: () => tAdd(+d.s), tLap: () => { if (!T.sw.running) return; T.sw.laps.push(swNow()); renderTimer(); },
     tCustom: () => { const s = (+$('tMin').value || 0) * 60 + (+$('tSec').value || 0); if (s < 1) { toast('請輸入時間'); return; } tSet(s); },
     bzStart, bzReset, bzZero: () => { S.buzz.teams.forEach((x) => { x.s = 0; }); lsPut('buzz', S.buzz); bzPaint(); },
-    netOn: () => { netStart(lsGet('room') || newCode()); renderTool(); },
+    netOn: netOpen,
+    netPw: () => { const v = $('netPw').value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8); NET.pw = v; if (v) lsSet('pw.' + NET.code, v); else lsDel('pw.' + NET.code); netReconnect(); renderTool(); toast(v ? '密碼已設為 ' + v : '已取消密碼'); },
     netOff: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定中斷？'; return; } netStop(); },
     netNew: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定換？學生要重新掃'; return; } netStop(); netStart(newCode()); renderTool(); },
     qrBig: () => { openModal('<div class="qrBig"><h2>📱 掃描加入</h2><div class="qr" id="qrModal"></div><div class="joinCode" style="font-size:3.4rem">' + NET.code + '</div><div class="joinUrl">' + esc(joinUrl(NET.code)) + '</div><button class="btn" data-act="close">關閉</button></div>', true); drawQR($('qrModal'), Math.min(420, innerWidth - 90, innerHeight - 280)); },
     copyJoin: () => copyText(joinUrl(NET.code)),
-    vStart, vClose: () => { const p = S.vote.cur; p.state = 'closed'; lsPut('vote', S.vote); setTeacher(teacherVoteName(p)); SND.pop(); votePaint(); },
-    vReopen: () => { const p = S.vote.cur; p.state = 'open'; lsPut('vote', S.vote); setTeacher(teacherVoteName(p)); votePaint(); },
-    vShow: () => { const p = S.vote.cur; p.show = !p.show; lsPut('vote', S.vote); votePaint(); },
-    vManual: () => { const p = S.vote.cur; p.manualOn = !p.manualOn; lsPut('vote', S.vote); votePaint(); },
-    vNext: () => { archivePoll(); S.vote.cur = null; lsPut('vote', S.vote); if (NET.want) setTeacher('T|w'); lastStageKey = ''; renderVote(); },
+    vStart, vClose: () => { const p = S.vote.cur; p.state = 'closed'; saveVote(); setTeacher(teacherVoteName(p)); SND.pop(); votePaint(); },
+    vReopen: () => { const p = S.vote.cur; p.state = 'open'; saveVote(); setTeacher(teacherVoteName(p)); votePaint(); },
+    vShow: () => { const p = S.vote.cur; p.show = !p.show; saveVote(); votePaint(); },
+    vManual: () => { const p = S.vote.cur; p.manualOn = !p.manualOn; saveVote(); votePaint(); },
+    vNext: () => { archivePoll(); S.vote.cur = null; saveVote(); if (NET.want) setTeacher('T|w'); lastStageKey = ''; renderVote(); },
     vAns: () => { const p = S.vote.cur, L = labelsOf(p), M = marksOf(p); openModal('<h2>✔ 設定正確答案</h2><p class="small">' + (p.type === 'm' ? '可以選多個。' : '選一個。') + '截止後學生手機會顯示答對或答錯。</p><div class="stack">' + L.map((l, i) => '<button class="btn alt" data-ans-pick="' + LETTERS[i] + '" aria-pressed="' + (p.ans.indexOf(LETTERS[i]) >= 0) + '">' + esc(M[i] + ' ' + l) + '</button>').join('') + '</div><div class="stack"><button class="btn" data-act="vAnsOk">確定</button><button class="btn alt" data-act="vAnsClear">不設答案</button></div>'); },
-    vAnsOk: () => { const p = S.vote.cur; let a = Array.from(document.querySelectorAll('[data-ans-pick][aria-pressed="true"]')).map((b) => b.dataset.ansPick).join(''); if (p.type !== 'm') a = a.slice(-1); p.ans = a; lsPut('vote', S.vote); if (p.state !== 'open') setTeacher(teacherVoteName(p)); closeModal(); votePaint(); if (a && p.state === 'open') toast('截止後學生才會看到答案'); },
-    vAnsClear: () => { const p = S.vote.cur; p.ans = ''; lsPut('vote', S.vote); setTeacher(teacherVoteName(p)); closeModal(); votePaint(); },
+    vAnsOk: () => { const p = S.vote.cur; let a = Array.from(document.querySelectorAll('[data-ans-pick][aria-pressed="true"]')).map((b) => b.dataset.ansPick).join(''); if (p.type !== 'm') a = a.slice(-1); p.ans = a; saveVote(); if (p.state !== 'open') setTeacher(teacherVoteName(p)); closeModal(); votePaint(); if (a && p.state === 'open') toast('截止後學生才會看到答案'); },
+    vAnsClear: () => { const p = S.vote.cur; p.ans = ''; saveVote(); setTeacher(teacherVoteName(p)); closeModal(); votePaint(); },
     vCsv: () => download('課堂投票紀錄-' + new Date().toLocaleDateString('sv') + '.csv', pollCsv(), 'text/csv'),
-    vClearHist: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定清除？'; return; } S.polls = []; lsPut('polls', S.polls); renderVote(); },
+    vClearHist: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定清除？'; return; } const id = roster().id; S.polls = lsJson('polls', []).filter((h) => h.rid && h.rid !== id); lsPut('polls', S.polls); renderVote(); },
     vSend: () => { if (JS.picks) voteSend(JS.pid, JS.picks); renderJoin(); },
     scCsv: () => scoreExport('csv'), scXlsx: () => scoreExport('xlsx'),
     bankOpen: () => { bankDraft = null; bankModal(); }, bankPick: () => $('bankFile').click(), bankUse,
@@ -857,12 +900,13 @@ document.addEventListener('change', (e) => {
   else if (t.dataset.tname != null) { S.buzz.teams[+t.dataset.tname].n = cut(t.value.trim(), 12) || '第 ' + (+t.dataset.tname + 1) + ' 組'; lsPut('buzz', S.buzz); bzPaint(); }
   else if (id === 'sndOn') { S.pref.sound = t.checked; savePref(); }
   else if (id === 'sndVol') { S.pref.vol = clamp(+t.value, .1, 1); savePref(); SND.pop(); }
-  else if (id === 'vNamed') { S.vote.named = t.checked; lsPut('vote', S.vote); }
-  else if (id === 'vQ' || id === 'vOpts') { S.vote.q = $('vQ').value; if ($('vOpts')) S.vote.opts = $('vOpts').value; lsPut('vote', S.vote); }
+  else if (id === 'vNamed') { S.vote.named = t.checked; saveVote(); }
+  else if (id === 'vQ' || id === 'vOpts') { S.vote.q = $('vQ').value; if ($('vOpts')) S.vote.opts = $('vOpts').value; saveVote(); }
 });
 document.addEventListener('submit', (e) => {
   e.preventDefault();
   if (e.target.id === 'codeForm') { const c = $('codeIn').value.toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!/^[A-Z0-9]{6}$/.test(c)) { toast('代碼是 6 個英文或數字'); return; } history.replaceState(null, '', '?join=' + c + (QS.get('presence') ? '&presence=' + encodeURIComponent(QS.get('presence')) : '')); joinStart(c); }
+  if (e.target.id === 'pwForm') { const v = $('pwIn').value.toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!v) { toast('請輸入密碼'); return; } NET.pw = v; lsSet('spw.' + NET.code, v); JS.pwNeed = false; renderJoin(); netReconnect(); return; }
   if (e.target.id === 'stunoForm') { const n = $('stunoIn').value.toUpperCase().replace(/[^A-Z0-9-]/g, ''); if (!n) { toast('請輸入學號（英文、數字）'); return; } JS.stuno = n.slice(0, 12); lsSet('stuno', JS.stuno); renderJoin(); }
   if (e.target.id === 'nickForm') { const n = $('nickIn').value.replace(/[|<>\u0000-\u001f]/g, '').trim(); if (!n) { toast('請輸入名字或組別'); return; } JS.nick = cut(n, 12); lsSet('nick', JS.nick); renderJoin(); }
 });
@@ -901,7 +945,7 @@ function initMarquee(){
 /* ---------- 啟動 ---------- */
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); window._dp = e; });
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('service-worker.js').catch(() => {});
-function joinStart(code){ JS.name = lsGet('my.' + code) || 'W'; netStart(code); renderJoin(); }
+function joinStart(code){ JS.name = lsGet('my.' + code) || 'W'; const pw = String(QS.get('pw') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8); if (pw) lsSet('spw.' + code, pw); netStart(code); renderJoin(); }
 applyPref(); initMarquee();
 if (JOIN) {
   document.title = '課堂小幫手・學生作答';
@@ -910,8 +954,14 @@ if (JOIN) {
 } else {
   renderShell(); renderTool();
   setInterval(tTick, 200);
-  const room = lsGet('room'); if (room && /^[A-Z0-9]{6}$/.test(room)) { netStart(room); if (S.tab === 'vote' || S.tab === 'buzz') renderTool(); }
+  const room = ssGet('room');
+  S.vote.cur = ssJson('vcur', null) || (room ? lsJson('vcur.' + room, null) : null);
   if (S.vote.cur && S.vote.cur.state === 'open') NET.state = teacherVoteName(S.vote.cur);
+  if (room && /^[A-Z0-9]{6}$/.test(room)) codeBusy(room).then((busy) => {
+    if (busy) { ssDel('room'); S.vote.cur = null; ssDel('vcur'); toast('這個分頁是複製出來的，原分頁還在用同一個代碼；要開放手機連線請按「開放手機連線」取得新代碼'); renderTool(); return; }
+    netStart(room); renderTool();
+  });
+  if (S.tab === 'vote') renderTool();
   if (!lsGet('warnSeen')) { lsSet('warnSeen', '1'); showWarn(); }
 }
 window._tch = {S, T, B, NET, JS, setTab, doDraw, doGroup, tSet, bzStart, bzHit, tally, pollChats, renderTool, importRoster, rosterExport, scoreRows, bankUse, bankFromFile, bankStart, scoreExport, openRoster};
