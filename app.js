@@ -62,6 +62,7 @@ const S = {
   vote: Object.assign({type:'s', q:'', opts:'', named:false}, lsJson('vote', {}), {cur:null}),
   polls: lsJson('polls', []),
   bank: Object.assign({name:'', items:[], used:[]}, lsJson('bank', {})),
+  auto: Object.assign({mode:'manual', ask:30, reveal:6, early:true, hide:true}, lsJson('auto', {})),
 };
 if (!TABS.some((t) => t.id === S.tab)) S.tab = 'draw';
 if (!S.buzz.teams) S.buzz.teams = Array.from({length:6}, (_, i) => ({n:'第 ' + (i + 1) + ' 組', s:0}));
@@ -309,6 +310,7 @@ function tTick(){
     if (left <= 0) { T.running = false; T.over = true; T.remain = 0; SND.alarm(); if (S.tab !== 'timer') toast('⏰ 計時器：時間到！'); }
   }
   if (S.tab === 'timer') tPaint();
+  autoTick();
   updChips();
 }
 function tPaint(){
@@ -623,7 +625,7 @@ function votePaint(){
   const k = 'poll' + p.pid + p.state + p.show + p.manualOn + p.ans + p.n;
   if (lastStageKey !== k) {
     lastStageKey = k;
-    st.innerHTML = '<div class="voteQ">' + esc(p.q || '（請看老師說明）') + '</div><div class="voteMeta"><span class="badge ' + (p.state === 'open' ? 'open' : 'closed') + '">' + (p.state === 'open' ? '投票中' : '已截止') + '</span><span>' + VOTE_TYPES[p.type].n + '</span><span id="vCnt"></span></div>' +
+    st.innerHTML = '<div class="voteQ">' + esc(p.q || '（請看老師說明）') + '</div><div class="voteMeta"><span class="badge ' + (p.state === 'open' ? 'open' : 'closed') + '">' + (p.state === 'open' ? '投票中' : '已截止') + '</span><span>' + VOTE_TYPES[p.type].n + '</span><span id="vCnt"></span><span id="vAuto"></span></div>' +
       (p.show ? '<div class="bars">' + labels.map((l, i) => '<div class="bar' + (p.ans && p.ans.indexOf(LETTERS[i]) >= 0 ? ' ans' : '') + '" style="--bc:' + COLORS[i % COLORS.length] + '"><span class="lb">' + esc(marks[i]) + '</span><span class="tt">' + esc(l) + '</span><span class="ct"><span id="vc' + i + '"></span>' +
         (p.manualOn ? ' <span class="mb"><button data-man="' + i + '" data-d="-1" aria-label="減一票">−</button><button data-man="' + i + '" data-d="1" aria-label="加一票">＋</button></span>' : '') + '</span><div class="tr"><i id="vb' + i + '"></i></div></div>').join('') + '</div><div class="avg" id="vAvg"></div>'
         : '<div class="hiddenRes"><span>結果先保密，已作答</span><b id="vHid">0</b><span>人</span></div>') +
@@ -633,6 +635,7 @@ function votePaint(){
       '<button class="btn alt" data-act="vManual" aria-pressed="' + !!p.manualOn + '">✋ 舉手計票' + (p.manualOn ? '（開）' : '') + '</button>' +
       '<button class="btn y" data-act="vNext">➕ 下一題</button></div>';
   }
+  autoPaint();
   const cnt = $('vCnt'); if (cnt) cnt.textContent = '已作答 ' + voters + ' 人' + (NET.want ? '／連線 ' + studentCount() + ' 人' : '');
   const hid = $('vHid'); if (hid) hid.textContent = voters;
   labels.forEach((_, i) => {
@@ -707,7 +710,7 @@ function bankCard(){
   if (!it.length) return '<div class="card"><h3>📚 題庫</h3><p class="small" style="margin:0 0 .4rem">上傳 Word（.docx）、Excel、CSV 或文字檔，事先出好的題目一題一題出，答案自動帶入。</p><div class="row"><button class="btn alt" data-act="bankOpen">📂 匯入題庫</button><button class="btn alt" data-act="bankTpl">⬇ Excel 範本</button></div></div>';
   const used = new Set(b.used || []), next = it.findIndex((_, i) => !used.has(i));
   return '<div class="card"><h3>📚 題庫<span class="r">' + esc(cut(b.name, 14)) + '・已出 ' + used.size + '/' + it.length + '</span></h3>' +
-    (next >= 0 ? '<button class="btn y" data-act="bankNext" style="width:100%">▶ 出下一題（第 ' + (next + 1) + ' 題）</button>' : '<p class="small">全部出完了。</p>') +
+    autoPanel(next) +
     '<ol class="hist" style="margin-top:.4rem;padding-left:1.4em;list-style:decimal">' + it.map((q, i) => '<li' + (used.has(i) ? ' style="opacity:.55"' : '') + '><b>' + esc(cut(q.q, 40)) + '</b><span class="small">' + VOTE_TYPES[q.type].n + (q.ans ? '・答案 ' + esc(ansShow(q)) : '・未設答案') + (used.has(i) ? '・已出' : '') + '</span> <button class="ib" data-bank="' + i + '" style="min-height:2rem">▶ 出這題</button></li>').join('') + '</ol>' +
     '<div class="row" style="margin-top:.5rem"><button class="btn alt" data-act="bankOpen">📂 換題庫</button><button class="btn alt" data-act="bankReset">↺ 重新開始</button><button class="btn alt" data-act="bankClear">🗑 清空</button></div></div>';
 }
@@ -727,7 +730,57 @@ async function bankFromFile(f){
   catch (e) { toast(e.message || '讀檔失敗'); }
 }
 function bankUse(){ if (!bankDraft || !bankDraft.items.length) return; S.bank = {name:bankDraft.name || '貼上的題目', items:bankDraft.items.slice(0, 200), used:[]}; lsPut('bank', S.bank); bankDraft = null; closeModal(); renderVote(); toast('題庫已載入，共 ' + S.bank.items.length + ' 題'); }
-function bankStart(i){
+function autoPanel(next){
+  const a = S.auto, auto = a.mode === 'auto';
+  let h = '<span class="seg" role="group" aria-label="出題方式" style="margin-bottom:.5rem"><button data-amode="manual" aria-pressed="' + !auto + '">✋ 手動出題</button><button data-amode="auto" aria-pressed="' + auto + '">⏱ 自動出題</button></span>';
+  if (!auto) return h + (next >= 0 ? '<button class="btn y" data-act="bankNext" style="width:100%">▶ 出下一題（第 ' + (next + 1) + ' 題）</button>' : '<p class="small">全部出完了，按「↺ 重新開始」可以再出一輪。</p>');
+  h += '<div class="row"><span class="small">每題作答</span>' + numBox('autoAsk', a.ask, 5, 600) + '<span class="small">秒</span></div>' +
+    '<div class="row" style="margin-top:.3rem"><span class="small">公布答案停留</span>' + numBox('autoReveal', a.reveal, 0, 120) + '<span class="small">秒</span></div>' +
+    '<label class="ck"><input type="checkbox" id="autoEarly"' + (a.early ? ' checked' : '') + '> 全班都作答完就提早截止</label>' +
+    '<label class="ck"><input type="checkbox" id="autoHide"' + (a.hide ? ' checked' : '') + '> 作答時先隱藏結果</label>';
+  if (AUTO.on) h += '<div class="row" style="margin-top:.4rem"><button class="btn ' + (AUTO.paused ? 'g' : 'alt') + '" data-act="autoPause">' + (AUTO.paused ? '▶ 繼續' : '⏸ 暫停') + '</button><button class="btn red" data-act="autoStop">⏹ 停止自動</button></div>';
+  else h += next >= 0 ? '<button class="btn y" data-act="autoStart" style="width:100%;margin-top:.4rem">▶ 開始自動出題（從第 ' + (next + 1) + ' 題）</button>' : '<p class="small">全部出完了，按「↺ 重新開始」可以再出一輪。</p>';
+  return h + '<p class="small" style="margin:.3rem 0 0">時間到自動截止、公布答案，停留後自動出下一題，一直到題庫出完。中途按「截止」「下一題」或「出這題」會切回手動。</p>';
+}
+/* 自動出題 */
+const AUTO = {on:false, paused:false, phase:'', until:0, left:0};
+const nextBankIdx = () => { const used = new Set(S.bank.used); return S.bank.items.findIndex((_, k) => !used.has(k)); };
+function autoStart(){
+  const i = nextBankIdx(); if (i < 0) { toast('題庫都出完了'); return; }
+  AUTO.on = true; AUTO.paused = false; autoAsk(i);
+}
+function autoAsk(i){
+  bankStart(i, true);
+  const p = S.vote.cur; if (p && S.auto.hide) { p.show = false; saveVote(); lastStageKey = ''; votePaint(); }
+  AUTO.phase = 'ask'; AUTO.until = Date.now() + S.auto.ask * 1000; autoPaint();
+}
+function autoStop(msg){ if (!AUTO.on) return; AUTO.on = false; AUTO.paused = false; AUTO.phase = ''; if (msg) toast(msg); if (S.tab === 'vote') renderVote(); }
+function autoTick(){
+  if (!AUTO.on || AUTO.paused) return;
+  const p = S.vote.cur, now = Date.now();
+  if (!p) { autoStop(); return; }
+  if (AUTO.phase === 'ask') {
+    const all = S.auto.early && NET.want && studentCount() > 0 && tally(p).voters >= studentCount();
+    if (now >= AUTO.until || all) {
+      p.state = 'closed'; p.show = true; saveVote(); setTeacher(teacherVoteName(p)); SND.pop(); lastStageKey = ''; if (S.tab === 'vote') votePaint();
+      AUTO.phase = 'reveal'; AUTO.until = now + S.auto.reveal * 1000;
+    }
+  } else if (AUTO.phase === 'reveal' && now >= AUTO.until) {
+    const i = nextBankIdx();
+    if (i < 0) { archivePoll(); S.vote.cur = null; saveVote(); if (NET.want) setTeacher('T|w'); lastStageKey = ''; autoStop('🎉 題庫全部出完了'); return; }
+    autoAsk(i);
+  }
+  autoPaint();
+}
+function autoPaint(){
+  const el = $('vAuto'); if (!el) return;
+  if (!AUTO.on) { el.textContent = ''; return; }
+  const left = Math.max(0, Math.ceil(((AUTO.paused ? AUTO.left : AUTO.until - Date.now())) / 1000));
+  el.textContent = AUTO.paused ? '⏸ 暫停中' : AUTO.phase === 'ask' ? '⏱ 剩 ' + left + ' 秒' : '✔ 公布答案・' + left + ' 秒後下一題';
+  el.className = 'badge ' + (AUTO.phase === 'ask' && left <= 5 && !AUTO.paused ? 'closed' : 'idle');
+}
+function bankStart(i, fromAuto){
+  if (!fromAuto) autoStop('已切回手動出題');
   const q = S.bank.items[i]; if (!q) return;
   if ($('vNamed')) S.vote.named = $('vNamed').checked;
   vStart(q); if (S.bank.used.indexOf(i) < 0) S.bank.used.push(i); lsPut('bank', S.bank); renderVote();
@@ -836,7 +889,7 @@ function openSettings(){
   $('restoreFile').addEventListener('change', restoreFile);
 }
 function saveFold(){ const o = []; document.querySelectorAll('.set-sec').forEach((d) => { if (d.open) o.push(d.dataset.sec); }); lsPut('fold', o); }
-const BACKUP_KEYS = ['pref', 'rosters', 'cur', 'drawn', 'drawOpt', 'grp', 'timer', 'buzz', 'vote', 'polls', 'bank'];
+const BACKUP_KEYS = ['pref', 'rosters', 'cur', 'drawn', 'drawOpt', 'grp', 'timer', 'buzz', 'vote', 'polls', 'bank', 'auto'];
 function backup(){ const o = {app:'teacher-classroom-helper', v:1, at:new Date().toISOString(), data:{}}; BACKUP_KEYS.forEach((k) => { const v = lsGet(k); if (v != null) o.data[k] = v; }); download('課堂小幫手備份-' + new Date().toLocaleDateString('sv') + '.json', JSON.stringify(o, null, 1), 'application/json'); }
 function restoreFile(e){
   const f = e.target.files[0]; if (!f) return;
@@ -871,6 +924,7 @@ document.addEventListener('click', (e) => {
   if (d.man != null) { const p = S.vote.cur; if (!p) return; p.manual[+d.man] = Math.max(0, (p.manual[+d.man] || 0) + (+d.d)); saveVoteSoon(); votePaint(); return; }
   if (d.vote) { joinPick(d.vote); return; }
   if (d.bank != null) { bankStart(+d.bank); return; }
+  if (d.amode) { if (d.amode === 'manual') autoStop(); S.auto.mode = d.amode; lsPut('auto', S.auto); renderVote(); return; }
   if (d.themeSet) { S.pref.theme = d.themeSet; savePref(); openSettings(); return; }
   if (d.fsSet) { S.pref.fs = d.fsSet; savePref(); openSettings(); return; }
   if (d.ansPick) { t.setAttribute('aria-pressed', t.getAttribute('aria-pressed') !== 'true'); return; }
@@ -895,11 +949,11 @@ document.addEventListener('click', (e) => {
     qrBig: () => { openModal('<div class="qrBig"><h2>📱 掃描加入</h2><div class="qr" id="qrModal"></div><div class="joinCode" style="font-size:3.4rem">' + NET.code + '</div><div class="joinUrl">' + esc(joinUrl(NET.code)) + '</div><button class="btn" data-act="close">關閉</button></div>', true); drawQR($('qrModal'), Math.min(420, innerWidth - 90, innerHeight - 280)); },
     joinedList: openJoined, joinedCsv,
     copyJoin: () => copyText(joinUrl(NET.code)),
-    vStart, vClose: () => { const p = S.vote.cur; p.state = 'closed'; saveVote(); setTeacher(teacherVoteName(p)); SND.pop(); votePaint(); },
-    vReopen: () => { const p = S.vote.cur; p.state = 'open'; saveVote(); setTeacher(teacherVoteName(p)); votePaint(); },
+    vStart, vClose: () => { autoStop('已切回手動出題'); const p = S.vote.cur; p.state = 'closed'; saveVote(); setTeacher(teacherVoteName(p)); SND.pop(); votePaint(); },
+    vReopen: () => { autoStop('已切回手動出題'); const p = S.vote.cur; p.state = 'open'; saveVote(); setTeacher(teacherVoteName(p)); votePaint(); },
     vShow: () => { const p = S.vote.cur; p.show = !p.show; saveVote(); votePaint(); },
     vManual: () => { const p = S.vote.cur; p.manualOn = !p.manualOn; saveVote(); votePaint(); },
-    vNext: () => { archivePoll(); S.vote.cur = null; saveVote(); if (NET.want) setTeacher('T|w'); lastStageKey = ''; renderVote(); },
+    vNext: () => { autoStop('已切回手動出題'); archivePoll(); S.vote.cur = null; saveVote(); if (NET.want) setTeacher('T|w'); lastStageKey = ''; renderVote(); },
     vAns: () => { const p = S.vote.cur, L = labelsOf(p), M = marksOf(p); openModal('<h2>✔ 設定正確答案</h2><p class="small">' + (p.type === 'm' ? '可以選多個。' : '選一個。') + '截止後學生手機會顯示答對或答錯。</p><div class="stack">' + L.map((l, i) => '<button class="btn alt" data-ans-pick="' + LETTERS[i] + '" aria-pressed="' + (p.ans.indexOf(LETTERS[i]) >= 0) + '">' + esc(M[i] + ' ' + l) + '</button>').join('') + '</div><div class="stack"><button class="btn" data-act="vAnsOk">確定</button><button class="btn alt" data-act="vAnsClear">不設答案</button></div>'); },
     vAnsOk: () => { const p = S.vote.cur; let a = Array.from(document.querySelectorAll('[data-ans-pick][aria-pressed="true"]')).map((b) => b.dataset.ansPick).join(''); if (p.type !== 'm') a = a.slice(-1); p.ans = a; saveVote(); if (p.state !== 'open') setTeacher(teacherVoteName(p)); closeModal(); votePaint(); if (a && p.state === 'open') toast('截止後學生才會看到答案'); },
     vAnsClear: () => { const p = S.vote.cur; p.ans = ''; saveVote(); setTeacher(teacherVoteName(p)); closeModal(); votePaint(); },
@@ -910,6 +964,8 @@ document.addEventListener('click', (e) => {
     bankOpen: () => { bankDraft = null; bankModal(); }, bankPick: () => $('bankFile').click(), bankUse,
     bankParse: () => { const r = TCHIO.parseQuizText($('bankText').value); bankDraft = Object.assign(r, {name:'貼上的題目'}); if (!r.items.length) toast('找不到題目，請參考格式說明'); const keep = $('bankText').value; bankModal(); $('bankText').value = keep; },
     bankTpl: () => downloadBlob('題庫範本.xlsx', TCHIO.xlsxBlob(BANK_TPL, '題庫', [36, 14, 14, 14, 14, 8])),
+    autoStart, autoStop: () => autoStop('已停止自動出題'),
+    autoPause: () => { if (!AUTO.on) return; if (AUTO.paused) { AUTO.until = Date.now() + AUTO.left; AUTO.paused = false; } else { AUTO.left = Math.max(0, AUTO.until - Date.now()); AUTO.paused = true; } autoPaint(); renderVote(); },
     bankNext: () => { const used = new Set(S.bank.used), i = S.bank.items.findIndex((_, k) => !used.has(k)); if (i >= 0) bankStart(i); },
     bankReset: () => { S.bank.used = []; lsPut('bank', S.bank); renderVote(); },
     bankClear: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定清空題庫？'; return; } S.bank = {name:'', items:[], used:[]}; lsPut('bank', S.bank); renderVote(); },
@@ -944,6 +1000,10 @@ document.addEventListener('change', (e) => {
   else if (t.dataset.tname != null) { S.buzz.teams[+t.dataset.tname].n = cut(t.value.trim(), 12) || '第 ' + (+t.dataset.tname + 1) + ' 組'; lsPut('buzz', S.buzz); bzPaint(); }
   else if (id === 'sndOn') { S.pref.sound = t.checked; savePref(); }
   else if (id === 'sndVol') { S.pref.vol = clamp(+t.value, .1, 1); savePref(); SND.pop(); }
+  else if (id === 'autoAsk') { S.auto.ask = clamp(+t.value || 30, 5, 600); t.value = S.auto.ask; lsPut('auto', S.auto); }
+  else if (id === 'autoReveal') { S.auto.reveal = clamp(+t.value || 0, 0, 120); t.value = S.auto.reveal; lsPut('auto', S.auto); }
+  else if (id === 'autoEarly') { S.auto.early = t.checked; lsPut('auto', S.auto); }
+  else if (id === 'autoHide') { S.auto.hide = t.checked; lsPut('auto', S.auto); }
   else if (id === 'vNamed') { S.vote.named = t.checked; saveVote(); }
   else if (id === 'vQ' || id === 'vOpts') { S.vote.q = $('vQ').value; if ($('vOpts')) S.vote.opts = $('vOpts').value; saveVote(); }
 });
@@ -1007,5 +1067,5 @@ if (JOIN) {
   if (S.tab === 'vote') renderTool();
   if (!lsGet('warnSeen')) { lsSet('warnSeen', '1'); showWarn(); }
 }
-window._tch = {S, T, B, NET, JS, setTab, doDraw, doGroup, tSet, bzStart, bzHit, tally, pollChats, renderTool, importRoster, rosterExport, scoreRows, bankUse, bankFromFile, bankStart, scoreExport, openRoster};
+window._tch = {S, T, B, NET, JS, setTab, doDraw, doGroup, tSet, bzStart, bzHit, tally, pollChats, renderTool, AUTO, autoStart, importRoster, rosterExport, scoreRows, bankUse, bankFromFile, bankStart, scoreExport, openRoster};
 })();
