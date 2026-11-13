@@ -213,14 +213,23 @@ function splitInline(text){
   if (seq.length < 2) return {head:text, opts:[]};
   return {head:text.slice(0, seq[0].i).trim(), opts:seq.map((x, k) => text.slice(x.end, k + 1 < seq.length ? seq[k + 1].i : text.length).trim())};
 }
+// 括號答案：「(B)題目」「題目（B）」「( b )」「（Ｏ）」→ 從題目拿掉、當成答案；題號前的空白括號「（　）」直接拿掉；題目中間的填空括號保留
+const LEAD_ANS = /^\s*[(（]\s*([A-Ha-hＡ-Ｈａ-ｈOXoxＯＸｏｘ○〇◯╳✕✗×]{1,8})\s*[)）]\s*/, TRAIL_ANS = /\s*[(（]\s*([A-Ha-hＡ-Ｈａ-ｈOXoxＯＸｏｘ○〇◯╳✕✗×]{1,8})\s*[)）]\s*$/, LEAD_EMPTY = /^\s*[(（][\s_＿]*[)）]\s*/;
+function takeAns(t){
+  let ans = '', m; t = String(t || '');
+  if ((m = LEAD_ANS.exec(t))) { ans = m[1]; t = t.slice(m[0].length); } else t = t.replace(LEAD_EMPTY, '');
+  if ((m = TRAIL_ANS.exec(t))) { if (!ans) ans = m[1]; t = t.slice(0, m.index); }
+  return {text:t.trim(), ans};
+}
 function finishQ(cur, out, skipped){
   if (!cur) return;
+  const ex = takeAns(cur.q); cur.q = ex.text; if (!String(cur.ans || '').trim()) cur.ans = ex.ans;
   const q = cur.q.replace(/\s+/g, ' ').trim(), opts = cur.opts.map((o) => o.replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 8);
   if (!q) return;
   if (opts.length >= 2) { const ans = normAns(cur.ans, opts.length); out.push({q, type:ans.length > 1 ? 'm' : 's', opts, ans}); }
   else { const ans = normAns(cur.ans, 0); if (ans) out.push({q, type:'t', opts:[], ans}); else skipped.push(q); }
 }
-const Q_RE = /^(?:[(（]\s*([A-Ha-hＡ-ＨOXＯＸ○╳✕]{1,8})\s*[)）]\s*)?(?:第\s*)?(?:Q\s*)?(\d{1,3}|[一二三四五六七八九十]{1,3})\s*(?:題)?\s*[.．、)）:：]\s*(.*)$/i;
+const Q_RE = /^(?:[(（]\s*([A-Ha-hＡ-ＨOXoxＯＸ○〇╳✕]{1,8})?[\s_＿]*[)）]\s*)?(?:第\s*)?(?:Q\s*)?(\d{1,3}|[一二三四五六七八九十]{1,3})\s*(?:題)?\s*[.．、)）:：]\s*(.*)$/i;
 const ANS_RE = /^(?:答案|正解|解答|正確答案|ans(?:wer)?)\s*[:：]?\s*(.+)$/i;
 const OPTLINE_RE = /^[(（]?\s*([A-Ha-hＡ-Ｈ])\s*[)）.．、:：]\s*(.*)$/;
 function parseQuizText(text){
@@ -235,15 +244,15 @@ function parseQuizText(text){
     if (forcedO && cur) { const s = splitInline(line); if (s.opts.length) cur.opts.push(...(s.head ? [s.head] : []), ...s.opts); else cur.opts.push(line); brk = false; return; }
     if (forcedQ || (m = Q_RE.exec(line))) {
       finishQ(cur, out, skipped);
-      const body = forcedQ ? line : m[3], s = splitInline(body);
-      cur = {q:s.head || body, opts:s.opts.slice(), ans:forcedQ ? '' : (m[1] || '')};
+      const ex = takeAns(forcedQ ? line : m[3]), s = splitInline(ex.text), ex2 = takeAns(s.head || ex.text);
+      cur = {q:ex2.text, opts:s.opts.slice(), ans:(forcedQ ? '' : (m[1] || '')) || ex.ans || ex2.ans};
       brk = false; return;
     }
     if (cur && (m = OPTLINE_RE.exec(line)) && FW(m[1]).toUpperCase().charCodeAt(0) - 65 === cur.opts.length) {
       const s = splitInline(line); if (s.opts.length >= 2) cur.opts.push(...s.opts); else cur.opts.push(m[2]);
       brk = false; return;
     }
-    if (!cur || (brk && (cur.opts.length || cur.ans))) { finishQ(cur, out, skipped); const s = splitInline(line); cur = {q:s.head || line, opts:s.opts.slice(), ans:''}; brk = false; return; }
+    if (!cur || (brk && (cur.opts.length || cur.ans))) { finishQ(cur, out, skipped); const ex = takeAns(line), s = splitInline(ex.text), ex2 = takeAns(s.head || ex.text); cur = {q:ex2.text, opts:s.opts.slice(), ans:ex.ans || ex2.ans}; brk = false; return; }
     if (cur.opts.length) cur.opts[cur.opts.length - 1] += ' ' + line; else { const s = splitInline(line); if (s.opts.length) { cur.q += ' ' + s.head; cur.opts.push(...s.opts); } else cur.q += ' ' + line; }
     brk = false;
   });
@@ -269,5 +278,5 @@ function rowsToQuiz(rows){
 }
 
 root.TCHIO = {zipStore, unzip, crc32, readFile, readXlsx, readDocx, parseCsv, decodeText, xlsxBlob, csvText,
-  parseRosterText, rowsToRoster, parseQuizText, rowsToQuiz, normAns, splitInline, isId};
+  parseRosterText, rowsToRoster, parseQuizText, rowsToQuiz, normAns, splitInline, takeAns, isId};
 })(typeof window !== 'undefined' ? window : globalThis);

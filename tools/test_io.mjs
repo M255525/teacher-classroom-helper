@@ -38,6 +38,25 @@ eq('no number question', IO.parseQuizText('天空是什麼顏色\nA. 藍\nB. 綠
 eq('option text with period', IO.parseQuizText('1. 單位？\nA. 3.5 公斤\nB. 1.2 公斤').items[0].opts, ['3.5 公斤','1.2 公斤']);
 eq('rows quiz header', IO.rowsToQuiz([['題號','題目','選項A','選項B','選項C','答案'],['1','Q1','x','y','z','c']]).items, [{q:'Q1',type:'s',opts:['x','y','z'],ans:'C'}]);
 eq('rows quiz noheader', IO.rowsToQuiz([['Q1','x','y','B'],['Q2','是非','','O']]).items.map(x=>[x.q,x.type,x.ans]), [['Q1','s','B'],['Q2','t','A']]);
+// 括號答案不要留在題目裡（2026-11-13）
+const pa = IO.parseQuizText(`1.（B）下列何者是程式語言？(A)Word (B)Python (C)Excel
+2. 台灣最高的山是哪一座？（ A ）
+A. 玉山
+B. 雪山
+( C )3.颱風季節？ (A)春 (B)冬 (C)夏秋
+4. (b) 小寫答案 (A)甲 (B)乙
+（　）5. 空白括號在題號前 (A)甲 (B)乙
+答案：A
+6. 台灣最高的山是（　）山。(A)玉 (B)雪
+答案：A
+7. 地球是圓的。（O）
+8.（Ｘ）太陽繞地球轉`);
+eq('paren answers', pa.items.map((x) => [x.q, x.ans, x.type]), [
+ ['下列何者是程式語言？','B','s'], ['台灣最高的山是哪一座？','A','s'], ['颱風季節？','C','s'], ['小寫答案','B','s'],
+ ['空白括號在題號前','A','s'], ['台灣最高的山是（ ）山。','A','s'], ['地球是圓的。','A','t'], ['太陽繞地球轉','B','t']]);
+eq('paren no leak', pa.items.every((x) => !/[(（]\s*[A-HOXＯＸ]\s*[)）]/i.test(x.q)), true);
+eq('rows paren', IO.rowsToQuiz([['題目','選項A','選項B','答案'],['（B）一加一？','1','2',''],['二加二？(A)','4','5','']]).items.map((x) => [x.q, x.ans]), [['一加一？','B'],['二加二？','A']]);
+eq('rows paren keeps answer col', IO.rowsToQuiz([['題目','選項A','選項B','答案'],['一加一？(A)','1','2','B']]).items.map((x) => [x.q, x.ans]), [['一加一？','B']]);
 // CSV
 eq('csv', IO.parseCsv('a,"b,c","d""e"\r\n1,2,3'), [['a','b,c','d"e'],['1','2','3']]);
 eq('csvText', IO.csvText([['學號','姓名'],['0123','王,小']]), '﻿學號,姓名\r\n="0123","王,小"');
