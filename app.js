@@ -694,7 +694,8 @@ function votePaint(){
       '<button class="btn y" data-act="vNext">➕ 下一題</button></div>';
   }
   autoPaint();
-  const cnt = $('vCnt'); if (cnt) cnt.textContent = '已作答 ' + voters + ' 人' + (NET.want ? '／連線 ' + studentCount() + ' 人' : '');
+  let okN = 0, badN = 0; if (p.ans && p.state !== 'open') Object.keys(p.votes).forEach((id) => { if (p.votes[id] === p.ans) okN++; else badN++; });
+  const cnt = $('vCnt'); if (cnt) cnt.textContent = '已作答 ' + voters + ' 人' + (NET.want ? '／連線 ' + studentCount() + ' 人' : '') + (p.ans && p.state !== 'open' && Object.keys(p.votes).length ? '・✔ 答對 ' + okN + ' 人・✘ 答錯 ' + badN + ' 人' : '');
   const hid = $('vHid'); if (hid) hid.textContent = voters;
   labels.forEach((_, i) => {
     const a = $('vc' + i), b = $('vb' + i); if (!a) return;
@@ -802,12 +803,36 @@ function renderQuiz(){
 const ansShow = (q) => q.type === 't' ? (q.ans === 'A' ? 'O' : 'X') : q.ans;
 function bankCard(){
   const b = S.bank, it = b.items;
-  if (!it.length) return '<div class="card"><h3>📚 題庫</h3><p class="small" style="margin:0 0 .4rem">上傳 Word（.docx）、Excel、CSV 或文字檔，事先出好的題目一題一題出，答案自動帶入。</p><div class="row"><button class="btn alt" data-act="bankOpen">📂 匯入題庫</button><button class="btn alt" data-act="bankTpl">⬇ Excel 範本</button></div></div>';
+  if (!it.length) return '<div class="card"><h3>📚 題庫</h3><p class="small" style="margin:0 0 .4rem">上傳 Word（.docx）、Excel、CSV 或文字檔，事先出好的題目一題一題出，答案自動帶入。</p><div class="row"><button class="btn alt" data-act="bankOpen">📂 匯入題庫</button><button class="btn alt" data-act="bankTpl">⬇ Excel 範本</button><button class="btn alt" data-act="bankAdd">➕ 手動新增一題</button></div></div>';
   const used = new Set(b.used || []), next = it.findIndex((_, i) => !used.has(i));
+  const noAns = it.filter((q) => !q.ans).length;
   return '<div class="card"><h3>📚 題庫<span class="r">' + esc(cut(b.name, 14)) + '・已出 ' + used.size + '/' + it.length + '</span></h3>' +
+    '<p class="small" style="margin:0 0 .4rem">✔ 有答案 ' + (it.length - noAns) + ' 題（會計算答對題數）' + (noAns ? '・<b style="color:var(--r)">⚠ 未設答案 ' + noAns + ' 題（不計分，可按 ✏ 補上）</b>' : '') + '</p>' +
     autoPanel(next) +
-    '<ol class="hist" style="margin-top:.4rem;padding-left:1.4em;list-style:decimal">' + it.map((q, i) => '<li' + (used.has(i) ? ' style="opacity:.55"' : '') + '><b>' + esc(cut(q.q, 40)) + '</b><span class="small">' + VOTE_TYPES[q.type].n + (q.ans ? '・答案 ' + esc(ansShow(q)) : '・未設答案') + (used.has(i) ? '・已出' : '') + '</span> <button class="ib" data-bank="' + i + '" style="min-height:2rem">▶ 出這題</button></li>').join('') + '</ol>' +
+    '<ol class="hist" style="margin-top:.4rem;padding-left:1.4em;list-style:decimal">' + it.map((q, i) => '<li' + (used.has(i) ? ' style="opacity:.55"' : '') + '><b>' + esc(cut(q.q, 40)) + '</b><span class="small">' + VOTE_TYPES[q.type].n + (q.ans ? '・答案 ' + esc(ansShow(q)) : '・<b style="color:var(--r)">⚠ 未設答案</b>') + (used.has(i) ? '・已出' : '') + '</span> <button class="ib" data-bank="' + i + '" style="min-height:2rem">▶ 出這題</button><button class="ib" data-bedit="' + i + '" style="min-height:2rem" title="修改答案">✏ 答案</button></li>').join('') + '</ol>' +
+    '<div class="row" style="margin-top:.4rem"><button class="btn alt" data-act="bankAdd">➕ 手動新增一題（含答案）</button></div>' +
     '<div class="row" style="margin-top:.5rem"><button class="btn alt" data-act="bankOpen">📂 換題庫</button><button class="btn alt" data-act="bankReset">↺ 重新開始</button><button class="btn alt" data-act="bankClear">🗑 清空</button></div></div>';
+}
+// 把答案寫回題庫（出題時才補的答案，下次出同一題就有了）
+function bankSetAns(i, ans, q){
+  const it = S.bank.items[i]; if (!it || (q != null && it.q !== q)) return;
+  it.ans = ans || ''; if (it.type === 's' && ans.length > 1) it.type = 'm';
+  lsPut('bank', S.bank);
+}
+function bankEdit(i){
+  const q = S.bank.items[i]; if (!q) return;
+  const marks = q.type === 't' ? ['⭕ 是', '❌ 否'] : q.opts.map((o, k) => LETTERS[k] + '. ' + o);
+  openModal('<h2>✏ 設定答案</h2><p><b>' + esc(q.q) + '</b></p><p class="small">' + (q.type === 't' ? '是非題選一個。' : '選一個＝單選題；選兩個以上＝多選題。') + '</p><div class="stack">' +
+    marks.map((m, k) => '<button class="btn alt" data-ans-pick="' + LETTERS[k] + '" aria-pressed="' + (q.ans.indexOf(LETTERS[k]) >= 0) + '">' + esc(m) + '</button>').join('') + '</div>' +
+    '<div class="stack"><button class="btn" data-act="bankEditOk" data-i="' + i + '">💾 儲存答案</button><button class="btn alt" data-act="close">取消</button></div>');
+}
+function bankAddModal(){
+  openModal('<h2>➕ 手動新增一題</h2>' +
+    '<label class="small" style="display:block">題目<input class="tx" id="baQ" maxlength="120"></label>' +
+    '<label class="small" style="display:block;margin-top:.5rem">選項（一行一個，2～8 個；<b>空白＝是非題</b>）<textarea class="tx" id="baOpts" rows="4"></textarea></label>' +
+    '<label class="small" style="display:block;margin-top:.5rem">答案（選擇題填字母，例如 B 或多選 AC；是非題填 O 或 X；不知道可以先空著）<input class="tx" id="baAns" maxlength="8" style="text-transform:uppercase"></label>' +
+    '<div class="stack"><button class="btn" data-act="bankAddOk">➕ 加入題庫</button><button class="btn alt" data-act="close">取消</button></div>');
+  setTimeout(() => { const e = $('baQ'); if (e) e.focus(); }, 50);
 }
 let bankDraft = null;
 function bankModal(){
@@ -815,7 +840,8 @@ function bankModal(){
   openModal('<h2>📚 匯入題庫</h2><div class="row"><button class="btn y" data-act="bankPick">📂 選擇檔案（.docx／.xlsx／.csv／.txt）</button><button class="btn alt" data-act="bankTpl">⬇ Excel 範本</button><input type="file" id="bankFile" accept=".docx,.xlsx,.xlsm,.csv,.tsv,.txt,.md" hidden></div>' +
     '<details style="margin-top:.5rem"><summary class="small" style="cursor:pointer">Word／文字檔怎麼寫？</summary><pre class="small" style="white-space:pre-wrap;background:var(--bg);padding:.5rem;border-radius:.5rem">1. 下列何者是大型語言模型？\n(A) Excel (B) ChatGPT (C) Word\n答案：B\n\n2. 哪些是 Google 的產品？\nA. Gemini\nB. Claude\nC. NotebookLM\n答案：AC（多個答案＝多選題）\n\n(X)3. 毛利率越高一定越賺錢。（沒有選項、答案 O/X＝是非題）</pre><p class="small">題號、選項可以用 Word 自動編號；答案寫在「答案：」後面，或像考卷寫在題號前面「(B)1.」。沒有答案也能出題，只是不計分。Excel／CSV：欄位「題目、選項A～選項H、答案」。</p></details>' +
     '<label class="small" style="display:block;margin-top:.5rem">或直接貼上題目文字<textarea class="tx" id="bankText" rows="5"></textarea></label><button class="btn alt" data-act="bankParse" style="margin-top:.4rem">解析貼上的文字</button>' +
-    (d ? '<div class="card" style="margin-top:.7rem"><h3>讀到 ' + d.items.length + ' 題' + (d.skipped.length ? '<span class="r">略過 ' + d.skipped.length + ' 題</span>' : '') + '</h3><ol class="hist" style="padding-left:1.4em;list-style:decimal">' +
+    (d ? '<div class="card" style="margin-top:.7rem"><h3>讀到 ' + d.items.length + ' 題' + (d.skipped.length ? '<span class="r">略過 ' + d.skipped.length + ' 題</span>' : '') + '</h3>' +
+      '<p class="small" style="margin:0 0 .3rem">✔ 有答案 ' + d.items.filter((q) => q.ans).length + ' 題，答案會一起存進題庫，用來計算答對題數' + (d.items.some((q) => !q.ans) ? '；<b style="color:var(--r)">⚠ 沒讀到答案 ' + d.items.filter((q) => !q.ans).length + ' 題</b>（匯入後可以在題庫按「✏ 答案」補上）' : '') + '。</p>' + '<ol class="hist" style="padding-left:1.4em;list-style:decimal">' +
       d.items.map((q) => '<li><b>' + esc(q.q) + '</b><span class="small">' + VOTE_TYPES[q.type].n + '・' + (q.type === 't' ? '是／否' : q.opts.map((o, i) => LETTERS[i] + '. ' + esc(o)).join('　')) + '・' + (q.ans ? '答案 ' + esc(ansShow(q)) : '未設答案') + '</span></li>').join('') + '</ol>' +
       (d.skipped.length ? '<p class="small">略過（沒有選項也沒有是非答案）：' + d.skipped.map((x) => esc(cut(x, 20))).join('、') + '</p>' : '') + '</div>' : '') +
     '<div class="stack">' + (d && d.items.length ? '<button class="btn" data-act="bankUse">✔ 使用這 ' + d.items.length + ' 題</button>' : '') + '<button class="btn alt" data-act="close">取消</button></div>', true);
@@ -877,7 +903,7 @@ function autoPaint(){
 function bankStart(i, fromAuto){
   if (!fromAuto) autoStop('已切回手動出題');
   const q = S.bank.items[i]; if (!q) return;
-  vStart(q); if (S.bank.used.indexOf(i) < 0) S.bank.used.push(i); lsPut('bank', S.bank); renderVote();
+  vStart(q); if (S.vote.cur) { S.vote.cur.bankIdx = i; saveVote(); } if (S.bank.used.indexOf(i) < 0) S.bank.used.push(i); lsPut('bank', S.bank); renderVote();
 }
 const BANK_TPL = [['題目', '選項A', '選項B', '選項C', '選項D', '答案'], ['下列何者是大型語言模型？', 'Excel', 'ChatGPT', 'Word', '小畫家', 'B'], ['哪些是 Google 的產品？', 'Gemini', 'Claude', 'NotebookLM', '', 'AC'], ['毛利率越高一定越賺錢。', '', '', '', '', 'X']];
 function pollCsv(){
@@ -1026,6 +1052,7 @@ document.addEventListener('click', (e) => {
   if (d.man != null) { const p = S.vote.cur; if (!p) return; p.manual[+d.man] = Math.max(0, (p.manual[+d.man] || 0) + (+d.d)); saveVoteSoon(); votePaint(); return; }
   if (d.vote) { joinPick(d.vote); return; }
   if (d.bank != null) { bankStart(+d.bank); return; }
+  if (d.bedit != null) { bankEdit(+d.bedit); return; }
   if (d.room) { lobbyPick(d.room, d.rpw === '1', d.rname || ''); return; }
   if (d.scq) { scoreExport(d.kind, d.scq); return; }
   if (d.amode) { if (d.amode === 'manual') autoStop(); S.auto.mode = d.amode; lsPut('auto', S.auto); renderVote(); return; }
@@ -1063,7 +1090,7 @@ document.addEventListener('click', (e) => {
     vManual: () => { const p = S.vote.cur; p.manualOn = !p.manualOn; saveVote(); votePaint(); },
     vNext: () => { autoStop('已切回手動出題'); archivePoll(); S.vote.cur = null; saveVote(); if (NET.want) setTeacher('T|w'); lastStageKey = ''; renderVote(); },
     vAns: () => { const p = S.vote.cur, L = labelsOf(p), M = marksOf(p); openModal('<h2>✔ 設定正確答案</h2><p class="small">' + (p.type === 'm' ? '可以選多個。' : '選一個。') + '截止後學生手機會顯示答對或答錯。</p><div class="stack">' + L.map((l, i) => '<button class="btn alt" data-ans-pick="' + LETTERS[i] + '" aria-pressed="' + (p.ans.indexOf(LETTERS[i]) >= 0) + '">' + esc(M[i] + ' ' + l) + '</button>').join('') + '</div><div class="stack"><button class="btn" data-act="vAnsOk">確定</button><button class="btn alt" data-act="vAnsClear">不設答案</button></div>'); },
-    vAnsOk: () => { const p = S.vote.cur; let a = Array.from(document.querySelectorAll('[data-ans-pick][aria-pressed="true"]')).map((b) => b.dataset.ansPick).join(''); if (p.type !== 'm') a = a.slice(-1); p.ans = a; saveVote(); if (p.state !== 'open') setTeacher(teacherVoteName(p)); closeModal(); votePaint(); if (a && p.state === 'open') toast('截止後學生才會看到答案'); },
+    vAnsOk: () => { const p = S.vote.cur; let a = Array.from(document.querySelectorAll('[data-ans-pick][aria-pressed="true"]')).map((b) => b.dataset.ansPick).join(''); if (p.type !== 'm') a = a.slice(-1); p.ans = a; saveVote(); bankSetAns(p.bankIdx, a, p.q); if (p.state !== 'open') setTeacher(teacherVoteName(p)); closeModal(); votePaint(); if (a && p.state === 'open') toast('截止後學生才會看到答案'); },
     vAnsClear: () => { const p = S.vote.cur; p.ans = ''; saveVote(); setTeacher(teacherVoteName(p)); closeModal(); votePaint(); },
     vCsv: () => download('課堂投票紀錄-' + new Date().toLocaleDateString('sv') + '.csv', pollCsv(), 'text/csv'),
     vClearHist: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定清除？'; return; } const id = roster().id; S.polls = lsJson('polls', []).filter((h) => h.rid && h.rid !== id); lsPut('polls', S.polls); renderVote(); },
@@ -1076,6 +1103,20 @@ document.addEventListener('click', (e) => {
     autoStart, autoStop: () => autoStop('已停止自動出題'),
     autoPause: () => { if (!AUTO.on) return; if (AUTO.paused) { AUTO.until = Date.now() + AUTO.left; AUTO.paused = false; } else { AUTO.left = Math.max(0, AUTO.until - Date.now()); AUTO.paused = true; } autoPaint(); renderVote(); },
     bankNext: () => { const used = new Set(S.bank.used), i = S.bank.items.findIndex((_, k) => !used.has(k)); if (i >= 0) bankStart(i); },
+    bankAdd: bankAddModal,
+    bankAddOk: () => {
+      const q = cut($('baQ').value.trim(), 120), opts = $('baOpts').value.split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 8), raw = $('baAns').value;
+      if (!q) { toast('請輸入題目'); return; }
+      if (opts.length === 1) { toast('選擇題至少要 2 個選項（是非題請把選項留空）'); return; }
+      const ans = TCHIO.normAns(raw, opts.length);
+      if (raw.trim() && !ans) { toast(opts.length ? '答案請填選項字母，例如 B 或 AC' : '是非題答案請填 O 或 X'); return; }
+      const item = {q, type:opts.length ? (ans.length > 1 ? 'm' : 's') : 't', opts, ans};
+      if (!S.bank.items.length) { S.bank = {name:'自訂題目', items:[], used:[]}; if (!quizPolls(S.qs.id).length) newQuiz('自訂題目'); }
+      S.bank.items.push(item); lsPut('bank', S.bank); closeModal(); renderVote(); toast('已加入第 ' + S.bank.items.length + ' 題' + (ans ? '（答案 ' + ansShow(item) + '）' : '（未設答案，不計分）'));
+    },
+    bankEditOk: () => { const i = +d.i, a = Array.from(document.querySelectorAll('[data-ans-pick][aria-pressed="true"]')).map((b) => b.dataset.ansPick).join(''); const q = S.bank.items[i]; if (!q) return; if (q.type === 't' && a.length > 1) { toast('是非題只能選一個'); return; }
+      bankSetAns(i, a); const p = S.vote.cur; if (p && p.bankIdx === i && p.quiz) { p.ans = q.type === 's' ? a.slice(-1) : a; if (q.type === 'm' && p.type === 's') p.type = 'm'; saveVote(); if (p.state !== 'open') setTeacher(teacherVoteName(p)); lastStageKey = ''; votePaint(); }
+      closeModal(); renderVote(); toast(a ? '答案已存進題庫' : '已清除答案'); },
     bankReset: () => { S.bank.used = []; lsPut('bank', S.bank); renderVote(); },
     bankClear: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定清空題庫？'; return; } S.bank = {name:'', items:[], used:[]}; lsPut('bank', S.bank); renderVote(); },
     whoEdit: () => { JS.whoEdit = true; renderJoin(); },
