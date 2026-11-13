@@ -102,6 +102,7 @@ const S = {
   polls: lsJson('polls', []),
   bank: Object.assign({name:'', items:[], used:[]}, lsJson('bank', {})),
   qs: lsJson('quizSess', null) || {id:'q' + Date.now().toString(36), name:'', at:''},
+  quizOpt: Object.assign({reveal:'now', order:'seq', n:0}, lsJson('quizOpt', {})),
   auto: Object.assign({mode:'manual', ask:30, reveal:6, early:true, hide:true}, lsJson('auto', {})),
 };
 if (!TABS.some((t) => t.id === S.tab)) S.tab = 'draw';
@@ -645,7 +646,9 @@ function joinedCsv(){
   const rows = [['學號', '姓名', '狀態', '學生輸入', '時間']].concat(r.list.map((n) => [(r.ids || {})[n] || '', n, here[n] != null ? '已加入' : '未加入', here[n] || '', t]), L.filter((o) => !o.x || !o.x.name).map((o) => ['', '', '名單外', o.who, t]));
   download(r.name + '點名-' + new Date().toLocaleDateString('sv') + '.csv', TCHIO.csvText(rows), 'text/csv');
 }
-function teacherVoteName(p){ return 'T|v|' + p.pid + '|' + p.n + '|' + (p.named ? p.type.toUpperCase() : p.type) + '|' + (p.state === 'open' ? 'o' : 'c') + '|' + (p.state === 'open' ? '' : p.ans || ''); }
+// 測驗的答案公布方式：now 立即（每題截止就公布）、end 答完公布（全部出完才傳答案）、none 不公布
+const showAns = (p) => !p.quiz || S.quizOpt.reveal === 'now';
+function teacherVoteName(p){ const mode = p.quiz && S.quizOpt.reveal !== 'now' ? (S.quizOpt.reveal === 'end' ? 'e' : 'x') : ''; return 'T|v|' + p.pid + '|' + p.n + '|' + (p.named ? p.type.toUpperCase() : p.type) + '|' + (p.state === 'open' ? 'o' : 'c') + '|' + (p.state === 'open' || !showAns(p) ? '' : p.ans || '') + (mode ? '|' + mode : ''); }
 const isVT = () => S.tab === 'vote' || S.tab === 'quiz';
 // 投票與測驗共用同一個進行中的題目，各分頁只顯示自己的
 const tabPoll = () => { const p = S.vote.cur; return p && !!p.quiz === (S.tab === 'quiz') ? p : null; };
@@ -680,11 +683,11 @@ function votePaint(){
     return;
   }
   const {c, voters} = tally(p), max = Math.max(1, ...c), labels = labelsOf(p), marks = marksOf(p), total = c.reduce((a, b) => a + b, 0);
-  const k = 'poll' + S.tab + p.pid + p.state + p.show + p.manualOn + p.ans + p.n;
+  const k = 'poll' + S.quizOpt.reveal + S.bank.used.length + S.tab + p.pid + p.state + p.show + p.manualOn + p.ans + p.n;
   if (lastStageKey !== k) {
     lastStageKey = k;
-    st.innerHTML = '<div class="voteQ">' + esc(p.q || '（請看老師說明）') + '</div><div class="voteMeta"><span class="badge ' + (p.state === 'open' ? 'open' : 'closed') + '">' + (p.state === 'open' ? '投票中' : '已截止') + '</span><span>' + VOTE_TYPES[p.type].n + '</span>' + (p.quiz ? '<span>📝 第 ' + Math.max(1, S.bank.used.length) + ' / ' + S.bank.items.length + ' 題</span>' : '') + '<span id="vCnt"></span><span id="vAuto"></span></div>' +
-      (p.show ? '<div class="bars">' + labels.map((l, i) => '<div class="bar' + (p.ans && p.ans.indexOf(LETTERS[i]) >= 0 ? ' ans' : '') + '" style="--bc:' + COLORS[i % COLORS.length] + '"><span class="lb">' + esc(marks[i]) + '</span><span class="tt">' + esc(l) + '</span><span class="ct"><span id="vc' + i + '"></span>' +
+    st.innerHTML = '<div class="voteQ">' + esc(p.q || '（請看老師說明）') + '</div><div class="voteMeta"><span class="badge ' + (p.state === 'open' ? 'open' : 'closed') + '">' + (p.state === 'open' ? '投票中' : '已截止') + '</span><span>' + VOTE_TYPES[p.type].n + '</span>' + (p.quiz ? '<span>📝 第 ' + Math.max(1, roundPos().done) + ' / ' + roundPos().total + ' 題</span>' + (showAns(p) ? '' : '<span>🙈 ' + (S.quizOpt.reveal === 'end' ? '答案出完後公布' : '答案不公布') + '</span>') : '') + '<span id="vCnt"></span><span id="vAuto"></span></div>' +
+      (p.show ? '<div class="bars">' + labels.map((l, i) => '<div class="bar' + (p.ans && showAns(p) && p.ans.indexOf(LETTERS[i]) >= 0 ? ' ans' : '') + '" style="--bc:' + COLORS[i % COLORS.length] + '"><span class="lb">' + esc(marks[i]) + '</span><span class="tt">' + esc(l) + '</span><span class="ct"><span id="vc' + i + '"></span>' +
         (p.manualOn ? ' <span class="mb"><button data-man="' + i + '" data-d="-1" aria-label="減一票">−</button><button data-man="' + i + '" data-d="1" aria-label="加一票">＋</button></span>' : '') + '</span><div class="tr"><i id="vb' + i + '"></i></div></div>').join('') + '</div><div class="avg" id="vAvg"></div>'
         : '<div class="hiddenRes"><span>結果先保密，已作答</span><b id="vHid">0</b><span>人</span></div>') +
       '<div class="stageBar" style="margin-top:1rem">' + (p.state === 'open' ? '<button class="btn big red" data-act="vClose">⏹ 截止</button>' : '<button class="btn big g" data-act="vReopen">▶ 重新開放</button>') +
@@ -694,8 +697,8 @@ function votePaint(){
       '<button class="btn y" data-act="vNext">➕ 下一題</button></div>';
   }
   autoPaint();
-  let okN = 0, badN = 0; if (p.ans && p.state !== 'open') Object.keys(p.votes).forEach((id) => { if (p.votes[id] === p.ans) okN++; else badN++; });
-  const cnt = $('vCnt'); if (cnt) cnt.textContent = '已作答 ' + voters + ' 人' + (NET.want ? '／連線 ' + studentCount() + ' 人' : '') + (p.ans && p.state !== 'open' && Object.keys(p.votes).length ? '・✔ 答對 ' + okN + ' 人・✘ 答錯 ' + badN + ' 人' : '');
+  let okN = 0, badN = 0; if (p.ans && showAns(p) && p.state !== 'open') Object.keys(p.votes).forEach((id) => { if (p.votes[id] === p.ans) okN++; else badN++; });
+  const cnt = $('vCnt'); if (cnt) cnt.textContent = '已作答 ' + voters + ' 人' + (NET.want ? '／連線 ' + studentCount() + ' 人' : '') + (p.ans && showAns(p) && p.state !== 'open' && Object.keys(p.votes).length ? '・✔ 答對 ' + okN + ' 人・✘ 答錯 ' + badN + ' 人' : '');
   const hid = $('vHid'); if (hid) hid.textContent = voters;
   labels.forEach((_, i) => {
     const a = $('vc' + i), b = $('vb' + i); if (!a) return;
@@ -722,13 +725,14 @@ function vStart(item){
 }
 function archivePoll(){
   const p = S.vote.cur; if (!p) return; const {c, voters} = tally(p);
-  if (voters || c.some(Boolean)) { S.polls = lsJson('polls', []); S.polls.push(Object.assign(pollRecord(p), {rid:roster().id})); if (S.polls.length > 300) S.polls.shift(); lsPut('polls', S.polls); } // 先讀最新的，別蓋掉其他分頁寫的
+  // 測驗題就算沒人答也要記（算未作答）
+  if (voters || c.some(Boolean) || p.quiz) { S.polls = lsJson('polls', []); S.polls.push(Object.assign(pollRecord(p), {rid:roster().id})); if (S.polls.length > 300) S.polls.shift(); lsPut('polls', S.polls); } // 先讀最新的，別蓋掉其他分頁寫的
 }
 const myPolls = () => { const id = roster().id; return S.polls.filter((h) => (!h.rid || h.rid === id) && !h.quiz); };
 function pollRecord(p){
   const {c, voters} = tally(p), answers = {};
   if (p.named) Object.keys(p.votes).forEach((id) => { const w = p.who && p.who[id]; if (w) answers[w] = p.votes[id]; });
-  return {quiz:!!p.quiz, qid:p.qid || '', qname:p.qname || '', q:p.q, type:VOTE_TYPES[p.type].n, t:p.type, labels:labelsOf(p), c, voters, ans:p.ans ? p.ans.split('').map((L) => labelsOf(p)[LETTERS.indexOf(L)]).join('、') : '', ansL:p.ans || '', named:!!p.named, answers, at:p.at};
+  return {pid:p.pid, quiz:!!p.quiz, qid:p.qid || '', qname:p.qname || '', q:p.q, type:VOTE_TYPES[p.type].n, t:p.type, labels:labelsOf(p), c, voters, ans:p.ans ? p.ans.split('').map((L) => labelsOf(p)[LETTERS.indexOf(L)]).join('、') : '', ansL:p.ans || '', named:!!p.named, answers, at:p.at};
 }
 // 成績：記名計分＋有設答案的題目（含目前這題），每位學生一列；姓名用目前班級名單的學號對應
 // 成績：某一場測驗（qid）的題目，每位學生一列（✔／✘＋選了什麼、答對／答錯／未作答、得分），下方每題的答對／答錯／未作答名單
@@ -768,10 +772,25 @@ function quizSessions(){
   if (!seen[S.qs.id]) seen[S.qs.id] = {qid:S.qs.id, name:S.qs.name || '測驗', at:'', n:0};
   return Object.values(seen).reverse();
 }
+function revealAll(){
+  const p = S.vote.cur;
+  if (p && p.quiz && p.state === 'open') { p.state = 'closed'; saveVote(); }
+  const qs = quizPolls(S.qs.id).filter((h) => h.pid && h.ansL);
+  if (!qs.length) { toast('還沒有可以公布的題目'); return; }
+  if (!NET.want || NET.status !== 'on') { toast('請先開放手機連線'); return; }
+  // 每次公布一個編號 rid，手機只用這一次的答案（不會跟上一輪混在一起）
+  const rid = pid4(), chunks = []; let cur = '';
+  qs.forEach((h) => { const e = h.pid + h.ansL; if (('K0000.00/00:' + cur + ',' + e).length > 59 && cur) { chunks.push(cur); cur = e; } else cur = cur ? cur + ',' + e : e; });
+  if (cur) chunks.push(cur);
+  NET.q = []; queueChats(chunks.map((c, i) => 'K' + rid + '.' + (i + 1) + '/' + chunks.length + ':' + c));
+  setTeacher('T|r|' + rid + '|' + chunks.length + '|' + qs.length);
+  toast('📢 正在把 ' + qs.length + ' 題答案傳到學生手機（約 ' + Math.ceil(chunks.length * 2.7) + ' 秒）');
+}
 function scoreCard(){
   const sr = scoreRows(S.qs.id), past = quizSessions().filter((s) => s.qid !== S.qs.id && s.n);
   return '<div class="card"><h3>🏆 本次測驗成績<span class="r">' + (sr ? sr.nQ + ' 題・' + sr.nS + ' 人作答' : '') + '</span></h3>' +
     '<p class="small" style="margin:0 0 .4rem">「' + esc(S.qs.name || '測驗') + '」' + (sr ? '已計分 ' + sr.nQ + ' 題（有設答案的題目；按「下一題」或自動出題換題時記入）。' : '還沒有計分的題目。') + '</p>' +
+    (sr && S.quizOpt.reveal === 'end' ? '<div class="row" style="margin-bottom:.4rem"><button class="btn y" data-act="revealAll">📢 公布全部答案（傳到學生手機）</button></div>' : '') +
     (sr ? '<div class="row"><button class="btn alt" data-act="scCsv">⬇ 成績 CSV</button><button class="btn alt" data-act="scXlsx">⬇ 成績 Excel</button><button class="btn alt" data-act="scBoard">🏅 排行榜</button></div>' : '') +
     '<div class="row" style="margin-top:.4rem"><button class="btn alt" data-act="quizNew">🆕 開始新測驗</button></div>' +
     (past.length ? '<p class="small" style="margin:.5rem 0 .2rem">之前的測驗（' + esc(roster().name) + '）：</p><ul class="hist">' + past.slice(0, 10).map((s) => '<li><b>' + esc(s.name) + '</b><span class="small">' + esc(s.at) + '・' + s.n + ' 題</span> <button class="ib" data-scq="' + s.qid + '" data-kind="xlsx" style="min-height:2rem">⬇ Excel</button><button class="ib" data-scq="' + s.qid + '" data-kind="csv" style="min-height:2rem">⬇ CSV</button></li>').join('') + '</ul>' : '') + '</div>';
@@ -804,12 +823,12 @@ const ansShow = (q) => q.type === 't' ? (q.ans === 'A' ? 'O' : 'X') : q.ans;
 function bankCard(){
   const b = S.bank, it = b.items;
   if (!it.length) return '<div class="card"><h3>📚 題庫</h3><p class="small" style="margin:0 0 .4rem">上傳 Word（.docx）、Excel、CSV 或文字檔，事先出好的題目一題一題出，答案自動帶入。</p><div class="row"><button class="btn alt" data-act="bankOpen">📂 匯入題庫</button><button class="btn alt" data-act="bankTpl">⬇ Excel 範本</button><button class="btn alt" data-act="bankAdd">➕ 手動新增一題</button></div></div>';
-  const used = new Set(b.used || []), next = it.findIndex((_, i) => !used.has(i));
+  const used = new Set(b.used || []), next = nextBankIdx(), ord = bankOrder(), inRound = new Set(ord), rp = roundPos();
   const noAns = it.filter((q) => !q.ans).length;
-  return '<div class="card"><h3>📚 題庫<span class="r">' + esc(cut(b.name, 14)) + '・已出 ' + used.size + '/' + it.length + '</span></h3>' +
+  return '<div class="card"><h3>📚 題庫<span class="r">' + esc(cut(b.name, 14)) + '・這輪 ' + rp.done + '/' + rp.total + ' 題</span></h3>' +
     '<p class="small" style="margin:0 0 .4rem">✔ 有答案 ' + (it.length - noAns) + ' 題（會計算答對題數）' + (noAns ? '・<b style="color:var(--r)">⚠ 未設答案 ' + noAns + ' 題（不計分，可按 ✏ 補上）</b>' : '') + '</p>' +
-    autoPanel(next) +
-    '<ol class="hist" style="margin-top:.4rem;padding-left:1.4em;list-style:decimal">' + it.map((q, i) => '<li' + (used.has(i) ? ' style="opacity:.55"' : '') + '><b>' + esc(cut(q.q, 40)) + '</b><span class="small">' + VOTE_TYPES[q.type].n + (q.ans ? '・答案 ' + esc(ansShow(q)) : '・<b style="color:var(--r)">⚠ 未設答案</b>') + (used.has(i) ? '・已出' : '') + '</span> <button class="ib" data-bank="' + i + '" style="min-height:2rem">▶ 出這題</button><button class="ib" data-bedit="' + i + '" style="min-height:2rem" title="修改答案">✏ 答案</button></li>').join('') + '</ol>' +
+    quizOptPanel() + autoPanel(next) +
+    '<ol class="hist" style="margin-top:.4rem;padding-left:1.4em;list-style:decimal">' + it.map((q, i) => '<li' + (used.has(i) ? ' style="opacity:.55"' : !inRound.has(i) ? ' style="opacity:.35"' : '') + '><b>' + (S.quizOpt.order === 'rand' && inRound.has(i) ? '<span class="badge idle">第 ' + (ord.indexOf(i) + 1) + ' 題</span> ' : '') + (!inRound.has(i) ? '<span class="small">（這輪不出）</span> ' : '') + esc(cut(q.q, 40)) + '</b><span class="small">' + VOTE_TYPES[q.type].n + (q.ans ? '・答案 ' + esc(ansShow(q)) : '・<b style="color:var(--r)">⚠ 未設答案</b>') + (used.has(i) ? '・已出' : '') + '</span> <button class="ib" data-bank="' + i + '" style="min-height:2rem">▶ 出這題</button><button class="ib" data-bedit="' + i + '" style="min-height:2rem" title="修改答案">✏ 答案</button></li>').join('') + '</ol>' +
     '<div class="row" style="margin-top:.4rem"><button class="btn alt" data-act="bankAdd">➕ 手動新增一題（含答案）</button></div>' +
     '<div class="row" style="margin-top:.5rem"><button class="btn alt" data-act="bankOpen">📂 換題庫</button><button class="btn alt" data-act="bankReset">↺ 重新開始</button><button class="btn alt" data-act="bankClear">🗑 清空</button></div></div>';
 }
@@ -850,22 +869,37 @@ async function bankFromFile(f){
   try { const x = await TCHIO.readFile(f), res = x.rows ? TCHIO.rowsToQuiz(x.rows) : TCHIO.parseQuizText(x.text); bankDraft = Object.assign(res, {name:f.name.replace(/\.[^.]+$/, '')}); if (!res.items.length) toast('檔案裡找不到題目，請參考格式說明'); bankModal(); }
   catch (e) { toast(e.message || '讀檔失敗'); }
 }
-function bankUse(){ if (!bankDraft || !bankDraft.items.length) return; S.bank = {name:bankDraft.name || '貼上的題目', items:bankDraft.items.slice(0, 200), used:[]}; lsPut('bank', S.bank); if (!quizPolls(S.qs.id).length) newQuiz(S.bank.name); bankDraft = null; closeModal(); renderVote(); toast('題庫已載入，共 ' + S.bank.items.length + ' 題'); }
+function bankUse(){ if (!bankDraft || !bankDraft.items.length) return; S.bank = {name:bankDraft.name || '貼上的題目', items:bankDraft.items.slice(0, 200), used:[], order:null}; lsPut('bank', S.bank); if (!quizPolls(S.qs.id).length) newQuiz(S.bank.name); bankDraft = null; closeModal(); renderVote(); toast('題庫已載入，共 ' + S.bank.items.length + ' 題'); }
+function quizOptPanel(){
+  const o = S.quizOpt, total = S.bank.items.length;
+  const seg = (k, v, t) => '<button data-qopt="' + k + '" data-v="' + v + '" aria-pressed="' + (String(o[k]) === String(v)) + '">' + t + '</button>';
+  return '<div style="margin:.2rem 0 .6rem;padding:.5rem .6rem;border-radius:.6rem;box-shadow:inset 0 0 0 1.5px var(--line)">' +
+    '<div class="row"><span class="small" style="min-width:4.5em">出題順序</span><span class="seg">' + seg('order', 'seq', '依序') + seg('order', 'rand', '🎲 隨機') + '</span></div>' +
+    '<div class="row" style="margin-top:.35rem"><span class="small" style="min-width:4.5em">出幾題</span><span class="seg">' + seg('n', 0, '全部 ' + total + ' 題') + '</span>' + numBox('qCount', o.n > 0 ? o.n : Math.min(10, total || 10), 1, Math.max(1, total)) + '<button class="btn alt" data-act="qCountSet" style="min-height:2.5rem">只出這幾題</button></div>' +
+    '<div class="row" style="margin-top:.35rem"><span class="small" style="min-width:4.5em">公布答案</span><span class="seg">' + seg('reveal', 'now', '立即公布') + seg('reveal', 'end', '答完公布') + seg('reveal', 'none', '不公布') + '</span></div>' +
+    '<p class="small" style="margin:.3rem 0 0">' + (o.reveal === 'now' ? '每題截止就在大黑板與手機公布答案。' : o.reveal === 'end' ? '作答時不顯示答案；全部出完後按「📢 公布全部答案」（自動出題出完會自動公布），每位學生手機列出自己每題對錯。' : '學生看不到答案，只有老師下載的成績有對錯。') + '</p></div>';
+}
 function autoPanel(next){
   const a = S.auto, auto = a.mode === 'auto';
   let h = '<span class="seg" role="group" aria-label="出題方式" style="margin-bottom:.5rem"><button data-amode="manual" aria-pressed="' + !auto + '">✋ 手動出題</button><button data-amode="auto" aria-pressed="' + auto + '">⏱ 自動出題</button></span>';
-  if (!auto) return h + (next >= 0 ? '<button class="btn y" data-act="bankNext" style="width:100%">▶ 出下一題（第 ' + (next + 1) + ' 題）</button>' : '<p class="small">全部出完了，按「↺ 重新開始」可以再出一輪。</p>');
+  const rp = roundPos();
+  if (!auto) return h + (next >= 0 ? '<button class="btn y" data-act="bankNext" style="width:100%">▶ 出下一題（第 ' + (rp.done + 1) + ' / ' + rp.total + ' 題）</button>' : '<p class="small">全部出完了，按「↺ 重新開始」可以再出一輪。</p>');
   h += '<div class="row"><span class="small">每題作答</span>' + numBox('autoAsk', a.ask, 5, 600) + '<span class="small">秒</span></div>' +
     '<div class="row" style="margin-top:.3rem"><span class="small">公布答案停留</span>' + numBox('autoReveal', a.reveal, 0, 120) + '<span class="small">秒</span></div>' +
     '<label class="ck"><input type="checkbox" id="autoEarly"' + (a.early ? ' checked' : '') + '> 全班都作答完就提早截止</label>' +
     '<label class="ck"><input type="checkbox" id="autoHide"' + (a.hide ? ' checked' : '') + '> 作答時先隱藏結果</label>';
   if (AUTO.on) h += '<div class="row" style="margin-top:.4rem"><button class="btn ' + (AUTO.paused ? 'g' : 'alt') + '" data-act="autoPause">' + (AUTO.paused ? '▶ 繼續' : '⏸ 暫停') + '</button><button class="btn red" data-act="autoStop">⏹ 停止自動</button></div>';
-  else h += next >= 0 ? '<button class="btn y" data-act="autoStart" style="width:100%;margin-top:.4rem">▶ 開始自動出題（從第 ' + (next + 1) + ' 題）</button>' : '<p class="small">全部出完了，按「↺ 重新開始」可以再出一輪。</p>';
+  else h += next >= 0 ? '<button class="btn y" data-act="autoStart" style="width:100%;margin-top:.4rem">▶ 開始自動出題（從第 ' + (rp.done + 1) + ' / ' + rp.total + ' 題）</button>' : '<p class="small">全部出完了，按「↺ 重新開始」可以再出一輪。</p>';
   return h + '<p class="small" style="margin:.3rem 0 0">時間到自動截止、公布答案，停留後自動出下一題，一直到題庫出完。中途按「截止」「下一題」或「出這題」會切回手動。</p>';
 }
 /* 自動出題 */
 const AUTO = {on:false, paused:false, phase:'', until:0, left:0};
-const nextBankIdx = () => { const used = new Set(S.bank.used); return S.bank.items.findIndex((_, k) => !used.has(k)); };
+// 這一輪要出的題目（依序或隨機、全部或指定題數）
+function makeOrder(){ let idx = S.bank.items.map((_, i) => i); if (S.quizOpt.order === 'rand') idx = shuffle(idx); const n = +S.quizOpt.n || 0; return n > 0 ? idx.slice(0, n) : idx; }
+function bankOrder(){ const b = S.bank; if (!Array.isArray(b.order) || b.order.some((i) => i >= b.items.length) || (!b.order.length && b.items.length)) { b.order = makeOrder(); lsPut('bank', b); } return b.order; }
+function reorderBank(msg){ S.bank.order = makeOrder(); S.bank.used = []; lsPut('bank', S.bank); if (msg) toast(msg); }
+const nextBankIdx = () => { const used = new Set(S.bank.used); return bankOrder().find((k) => !used.has(k)) ?? -1; };
+const roundPos = () => { const ord = bankOrder(), used = new Set(S.bank.used); return {done:ord.filter((k) => used.has(k)).length, total:ord.length}; };
 function autoStart(){
   const i = nextBankIdx(); if (i < 0) { toast('題庫都出完了'); return; }
   AUTO.on = true; AUTO.paused = false; autoAsk(i);
@@ -888,7 +922,7 @@ function autoTick(){
     }
   } else if (AUTO.phase === 'reveal' && now >= AUTO.until) {
     const i = nextBankIdx();
-    if (i < 0) { archivePoll(); S.vote.cur = null; saveVote(); if (NET.want) setTeacher('T|w'); lastStageKey = ''; autoStop('🎉 題庫全部出完了'); return; }
+    if (i < 0) { archivePoll(); S.vote.cur = null; saveVote(); if (NET.want) setTeacher('T|w'); lastStageKey = ''; autoStop('🎉 這輪題目全部出完了'); if (S.quizOpt.reveal === 'end') revealAll(); return; }
     autoAsk(i);
   }
   autoPaint();
@@ -915,16 +949,18 @@ function pollCsv(){
 
 /* ---------- 學生手機頁 ---------- */
 const cleanWho = (v) => cut(String(v || '').replace(/[|<>\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim(), 12);
-const JS = {tid:'', name:'', qtext:{}, otext:{}, picks:'', who:cleanWho(lsGet('who') || lsGet('stuno') || ''), named:false};
+const JS = {mine:{}, rk:{}, tid:'', name:'', qtext:{}, otext:{}, picks:'', who:cleanWho(lsGet('who') || lsGet('stuno') || ''), named:false};
 // 學生狀態代碼最後一段一律帶學號／姓名：W|誰、S|題號|選項|誰、B|輪次|誰
 const withWho = (n) => { const a = String(n || 'W').split('|'); const k = a[0] === 'S' ? 3 : a[0] === 'B' ? 2 : 1; a.length = Math.max(a.length, k); a[k] = JS.who; return a.slice(0, k + 1).join('|'); };
-function voteSend(pid, L){ const n = 'S|' + pid + '|' + L + '|' + JS.who; if (n.length > 24) { toast('名字太長或選太多項，送不出去'); return false; } myName(n); return true; }
+function voteSend(pid, L){ const n = 'S|' + pid + '|' + L + '|' + JS.who; if (n.length > 24) { toast('名字太長或選太多項，送不出去'); return false; } myName(n); JS.mine[pid] = L; lsPut('mine.' + NET.code, JS.mine); return true; }
 function onChat(m){
   if (!m || !m.text) return;
   const tName = NET.peers.get(m.id);
   if (m.id !== JS.tid && !(tName && /^T\|/.test(tName))) return; // 只收老師送的題目
   let r = /^Q(\d{4}):(.*)$/.exec(m.text); if (r) { JS.qtext[r[1]] = r[2]; return; }
-  r = /^O(\d{4})\.(\d+):(.*)$/.exec(m.text); if (r) { (JS.otext[r[1]] = JS.otext[r[1]] || [])[+r[2]] = r[3]; }
+  r = /^O(\d{4})\.(\d+):(.*)$/.exec(m.text); if (r) { (JS.otext[r[1]] = JS.otext[r[1]] || [])[+r[2]] = r[3]; return; }
+  r = /^K(\d{4})\.(\d+)\/(\d+):(.*)$/.exec(m.text);
+  if (r) { const k = JS.rk[r[1]] = JS.rk[r[1]] || {keys:{}, order:[], got:{}}; k.got[r[2]] = 1; r[4].split(',').forEach((e) => { const x = /^(\d{4})([A-H]{1,8})$/.exec(e.trim()); if (x) { if (!(x[1] in k.keys)) k.order.push(x[1]); k.keys[x[1]] = x[2]; } }); }
 }
 function teacherState(){ const n = NET.peers.get(JS.tid); return n && /^T\|/.test(n) ? n.split('|') : null; }
 function myName(n){ JS.name = n; lsSet('my.' + NET.code, n); send({t:'look', name:n}); }
@@ -961,6 +997,7 @@ function renderJoin(){
   else if (!ts) body = '<div class="jWait"><span class="big">⏳</span>已加入，等老師開始</div>';
   else if (ts[1] === 'v') body = joinVote(ts);
   else if (ts[1] === 'b') body = joinBuzz(ts);
+  else if (ts[1] === 'r') body = joinResult(ts);
   else body = '<div class="jWait"><span class="big">🙂</span>已加入，等老師出題</div>';
   root.innerHTML = '<div class="join"><div class="jHead"><div class="brand"><img src="icons/icon-192.png" alt=""><span>課堂小幫手</span></div><div class="r"><button class="ib" data-act="whoEdit" style="min-height:1.9rem;font-size:.8rem">👤 ' + esc(JS.who) + ' ✎</button><span class="dot ' + (on ? 'on' : 'bad') + '"></span>' + NET.code + '</div></div><div class="jMain">' + body + '</div>' + joinFoot() + '</div>';
 }
@@ -978,12 +1015,23 @@ function joinVote(ts){
   if (!open && ans) {
     const ok = voted && voted === ans.split('').sort().join('');
     h += '<div class="result ' + (ok ? 'ok' : 'no') + '">' + (!voted ? '這題你沒有作答' : ok ? '🎉 答對了！' : '再接再厲！') + '</div><p class="jWait" style="font-size:1.1rem">答案：' + ans.split('').map((L) => esc(marks[LETTERS.indexOf(L)] + ' ' + (labels[LETTERS.indexOf(L)] || ''))).join('、') + '</p>';
-  } else if (!open) h += '<div class="jWait"><span class="big">⏹</span>投票已截止' + (voted ? '，你選了 ' + voted.split('').map((L) => esc(marks[LETTERS.indexOf(L)])).join('、') : '') + '</div>';
+  } else if (!open) h += '<div class="jWait"><span class="big">⏹</span>' + (named ? '已截止' : '投票已截止') + (voted ? '，你選了 ' + voted.split('').map((L) => esc(marks[LETTERS.indexOf(L)])).join('、') : '') + (ts[7] === 'e' ? '<br><small style="font-size:.75em">答案會在測驗結束後公布</small>' : '') + '</div>';
   const multi = type === 'm', picks = multi ? JS.picks : voted;
   h += '<div class="opts' + (n <= 2 || type === 't' ? ' two' : '') + '">' + Array.from({length:n}, (_, i) => '<button class="opt" style="--bc:' + COLORS[i % COLORS.length] + '" data-vote="' + LETTERS[i] + '" aria-pressed="' + (picks.indexOf(LETTERS[i]) >= 0) + '"' + (open ? '' : ' disabled') + '><span class="lb">' + esc(marks[i]) + '</span><span>' + esc(labels[i] || '') + '</span></button>').join('') + '</div>';
   if (open && multi) h += '<button class="btn big y" data-act="vSend"' + (JS.picks ? '' : ' disabled') + '>' + (voted && voted === JS.picks ? '✔ 已送出' : '送出（可複選）') + '</button>';
   if (open && voted) h += '<p class="jWait" style="font-size:1.05rem">✔ 已收到你的答案，截止前可以改。</p>';
   return h;
+}
+// 測驗結束公布答案：老師用聊天傳「題號＋答案」，手機用自己存的作答（JS.mine）算對錯，不經過別人
+function joinResult(ts){
+  const K = JS.rk[ts[2]] || {keys:{}, order:[], got:{}}, total = +ts[3] || 1, nQ = +ts[4] || K.order.length, got = Object.keys(K.got).length;
+  let ok = 0, done = 0;
+  const rows = K.order.map((pid, i) => { const a = K.keys[pid], me = JS.mine[pid] || ''; if (me) done++; const right = me && me === a; if (right) ok++;
+    return '<li style="display:flex;gap:.5rem;align-items:baseline;padding:.3rem 0;border-bottom:1px dashed var(--line)"><b style="min-width:3.5em">第 ' + (i + 1) + ' 題</b><span style="flex:1 1 auto;font-size:.9rem">' + esc(cut(JS.qtext[pid] || '', 24)) + '</span>' +
+      '<span style="white-space:nowrap">' + (!me ? '⬜ 未作答' : right ? '✔ ' + esc(me) : '✘ 你選 ' + esc(me)) + '・答案 ' + esc(a) + '</span></li>'; }).join('');
+  return '<div class="jQ">📊 測驗結果</div>' + (got < total ? '<p class="jWait" style="font-size:1rem">答案接收中 ' + got + ' / ' + total + '⋯</p>' : '') +
+    '<div class="result ' + (ok * 2 >= nQ ? 'ok' : 'no') + '">答對 ' + ok + ' / ' + nQ + ' 題</div><p class="jWait" style="font-size:1rem">作答 ' + done + ' 題</p>' +
+    '<ol style="list-style:none;padding:0;margin:0">' + rows + '</ol>';
 }
 function joinBuzz(ts){
   const rid = ts[2], phase = ts[3];
@@ -1017,7 +1065,7 @@ function openSettings(){
   $('restoreFile').addEventListener('change', restoreFile);
 }
 function saveFold(){ const o = []; document.querySelectorAll('.set-sec').forEach((d) => { if (d.open) o.push(d.dataset.sec); }); lsPut('fold', o); }
-const BACKUP_KEYS = ['pref', 'rosters', 'cur', 'drawn', 'drawOpt', 'grp', 'timer', 'buzz', 'vote', 'polls', 'bank', 'auto', 'quizSess'];
+const BACKUP_KEYS = ['pref', 'rosters', 'cur', 'drawn', 'drawOpt', 'grp', 'timer', 'buzz', 'vote', 'polls', 'bank', 'auto', 'quizSess', 'quizOpt'];
 function backup(){ const o = {app:'teacher-classroom-helper', v:1, at:new Date().toISOString(), data:{}}; BACKUP_KEYS.forEach((k) => { const v = lsGet(k); if (v != null) o.data[k] = v; }); download('課堂小幫手備份-' + new Date().toLocaleDateString('sv') + '.json', JSON.stringify(o, null, 1), 'application/json'); }
 function restoreFile(e){
   const f = e.target.files[0]; if (!f) return;
@@ -1052,6 +1100,10 @@ document.addEventListener('click', (e) => {
   if (d.man != null) { const p = S.vote.cur; if (!p) return; p.manual[+d.man] = Math.max(0, (p.manual[+d.man] || 0) + (+d.d)); saveVoteSoon(); votePaint(); return; }
   if (d.vote) { joinPick(d.vote); return; }
   if (d.bank != null) { bankStart(+d.bank); return; }
+  if (d.qopt) { const k = d.qopt; S.quizOpt[k] = k === 'n' ? +d.v : d.v; lsPut('quizOpt', S.quizOpt);
+    if (k !== 'reveal') { autoStop(); reorderBank(k === 'order' ? (d.v === 'rand' ? '改成隨機出題，從頭開始' : '改成依序出題，從頭開始') : '這輪出全部題目，從頭開始'); }
+    else { const p = S.vote.cur; if (p && p.quiz) { setTeacher(teacherVoteName(p)); lastStageKey = ''; votePaint(); } }
+    renderVote(); return; }
   if (d.bedit != null) { bankEdit(+d.bedit); return; }
   if (d.room) { lobbyPick(d.room, d.rpw === '1', d.rname || ''); return; }
   if (d.scq) { scoreExport(d.kind, d.scq); return; }
@@ -1102,7 +1154,9 @@ document.addEventListener('click', (e) => {
     bankTpl: () => downloadBlob('題庫範本.xlsx', TCHIO.xlsxBlob(BANK_TPL, '題庫', [36, 14, 14, 14, 14, 8])),
     autoStart, autoStop: () => autoStop('已停止自動出題'),
     autoPause: () => { if (!AUTO.on) return; if (AUTO.paused) { AUTO.until = Date.now() + AUTO.left; AUTO.paused = false; } else { AUTO.left = Math.max(0, AUTO.until - Date.now()); AUTO.paused = true; } autoPaint(); renderVote(); },
-    bankNext: () => { const used = new Set(S.bank.used), i = S.bank.items.findIndex((_, k) => !used.has(k)); if (i >= 0) bankStart(i); },
+    bankNext: () => { const i = nextBankIdx(); if (i >= 0) bankStart(i); },
+    qCountSet: () => { const n = clamp(+$('qCount').value || 1, 1, S.bank.items.length || 1); S.quizOpt.n = n >= S.bank.items.length ? 0 : n; lsPut('quizOpt', S.quizOpt); autoStop(); reorderBank('這輪出 ' + (S.quizOpt.n || S.bank.items.length) + ' 題' + (S.quizOpt.order === 'rand' ? '（隨機）' : '') + '，從頭開始'); renderVote(); },
+    revealAll,
     bankAdd: bankAddModal,
     bankAddOk: () => {
       const q = cut($('baQ').value.trim(), 120), opts = $('baOpts').value.split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 8), raw = $('baAns').value;
@@ -1112,13 +1166,13 @@ document.addEventListener('click', (e) => {
       if (raw.trim() && !ans) { toast(opts.length ? '答案請填選項字母，例如 B 或 AC' : '是非題答案請填 O 或 X'); return; }
       const item = {q, type:opts.length ? (ans.length > 1 ? 'm' : 's') : 't', opts, ans};
       if (!S.bank.items.length) { S.bank = {name:'自訂題目', items:[], used:[]}; if (!quizPolls(S.qs.id).length) newQuiz('自訂題目'); }
-      S.bank.items.push(item); lsPut('bank', S.bank); closeModal(); renderVote(); toast('已加入第 ' + S.bank.items.length + ' 題' + (ans ? '（答案 ' + ansShow(item) + '）' : '（未設答案，不計分）'));
+      S.bank.items.push(item); if (Array.isArray(S.bank.order) && !S.quizOpt.n) S.bank.order.push(S.bank.items.length - 1); lsPut('bank', S.bank); closeModal(); renderVote(); toast('已加入第 ' + S.bank.items.length + ' 題' + (ans ? '（答案 ' + ansShow(item) + '）' : '（未設答案，不計分）'));
     },
     bankEditOk: () => { const i = +d.i, a = Array.from(document.querySelectorAll('[data-ans-pick][aria-pressed="true"]')).map((b) => b.dataset.ansPick).join(''); const q = S.bank.items[i]; if (!q) return; if (q.type === 't' && a.length > 1) { toast('是非題只能選一個'); return; }
       bankSetAns(i, a); const p = S.vote.cur; if (p && p.bankIdx === i && p.quiz) { p.ans = q.type === 's' ? a.slice(-1) : a; if (q.type === 'm' && p.type === 's') p.type = 'm'; saveVote(); if (p.state !== 'open') setTeacher(teacherVoteName(p)); lastStageKey = ''; votePaint(); }
       closeModal(); renderVote(); toast(a ? '答案已存進題庫' : '已清除答案'); },
-    bankReset: () => { S.bank.used = []; lsPut('bank', S.bank); renderVote(); },
-    bankClear: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定清空題庫？'; return; } S.bank = {name:'', items:[], used:[]}; lsPut('bank', S.bank); renderVote(); },
+    bankReset: () => { autoStop(); reorderBank(S.quizOpt.order === 'rand' ? '已重新洗牌，從頭開始' : '從頭開始'); renderVote(); },
+    bankClear: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定清空題庫？'; return; } S.bank = {name:'', items:[], used:[], order:[]}; lsPut('bank', S.bank); renderVote(); },
     whoEdit: () => { JS.whoEdit = true; renderJoin(); },
     buzz: () => { const ts = teacherState(); if (!ts || ts[1] !== 'b' || ts[3] !== 'o') return; myName('B|' + ts[2] + '|' + JS.who); if (navigator.vibrate) navigator.vibrate(60); renderJoin(); },
 
@@ -1198,7 +1252,7 @@ function initMarquee(){
 /* ---------- 啟動 ---------- */
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); window._dp = e; });
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('service-worker.js').catch(() => {});
-function joinStart(code){ JS.name = withWho(lsGet('my.' + code) || 'W'); const pw = String(QS.get('pw') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8); if (pw) lsSet('spw.' + code, pw); netStart(code); renderJoin(); }
+function joinStart(code){ JS.mine = lsJson('mine.' + code, {}); JS.name = withWho(lsGet('my.' + code) || 'W'); const pw = String(QS.get('pw') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8); if (pw) lsSet('spw.' + code, pw); netStart(code); renderJoin(); }
 applyPref(); initMarquee();
 if (JOIN) {
   document.title = '課堂小幫手・學生作答';
@@ -1217,5 +1271,5 @@ if (JOIN) {
   if (isVT()) renderTool();
   if (!lsGet('warnSeen')) { lsSet('warnSeen', '1'); showWarn(); }
 }
-window._tch = {S, T, B, NET, JS, setTab, doDraw, doGroup, tSet, bzStart, bzHit, tally, pollChats, renderTool, LOB, fetchLobby, AUTO, autoStart, newQuiz, openBoard, importRoster, rosterExport, scoreRows, bankUse, bankFromFile, bankStart, scoreExport, openRoster};
+window._tch = {S, T, B, NET, JS, setTab, doDraw, doGroup, tSet, bzStart, bzHit, tally, pollChats, renderTool, revealAll, nextBankIdx, roundPos, LOB, fetchLobby, AUTO, autoStart, newQuiz, openBoard, importRoster, rosterExport, scoreRows, bankUse, bankFromFile, bankStart, scoreExport, openRoster};
 })();
