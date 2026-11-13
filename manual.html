@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>講師課堂小幫手・操作手冊</title>
+<link href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@700&family=Noto+Sans+TC:wght@500;700;900&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#1D2733;--sub:#56626E;--bg:#ECEEE8;--paper:#fff;--line:#D3D8CF;--board:#1D3A2E;--wood:#7A5232;--y:#B07F00;--red:#CC2E24;--blue:#1A64A8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:'Noto Sans TC','Microsoft JhengHei',sans-serif;font-weight:500;font-size:17px;line-height:1.75}
+header{background:var(--board);color:#F3F0E6;border-bottom:8px solid var(--wood);padding:22px 16px 18px}
+header div{max-width:820px;margin:0 auto}
+header h1{font-family:'LXGW WenKai TC',serif;font-size:32px;margin:0;line-height:1.3}
+header p{margin:6px 0 0;color:#C9D6CC}
+header a{color:#F6D86B}
+main{max-width:820px;margin:0 auto;padding:12px 16px 48px}
+h2{font-family:'LXGW WenKai TC',serif;font-size:24px;margin:4px 0 8px;color:var(--board)}
+h3{font-size:18px;margin:14px 0 4px}
+section{background:var(--paper);border-radius:14px;box-shadow:0 0 0 1.5px var(--line);padding:12px 18px 14px;margin-top:14px}
+a{color:var(--blue);font-weight:700}
+li{margin:5px 0}
+ol,ul{padding-left:1.3em}
+nav.toc{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:15px}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:15px;min-width:480px}
+th,td{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}
+th{background:var(--bg)}
+kbd{display:inline-block;border:1px solid #9aa3ab;border-bottom-width:3px;border-radius:5px;padding:0 6px;font-size:14px;background:#fafafa;font-family:inherit}
+.note{background:#FFF7DD;border-left:5px solid var(--y);border-radius:8px;padding:8px 12px;margin:8px 0}
+.warn{background:#FDECEA;border-left:5px solid var(--red);border-radius:8px;padding:8px 12px;margin:8px 0}
+code{background:var(--bg);border-radius:4px;padding:0 4px}
+@media print{body{background:#fff}section{break-inside:avoid;box-shadow:0 0 0 1px #888}}
+</style>
+</head>
+<body>
+<header><div>
+<h1>講師課堂小幫手・操作手冊</h1>
+<p>抽籤點名、隨機分組、計時器、搶答器、匿名即時投票，一個網頁投影上課就能用。<br><a href="index.html">← 回到工具</a></p>
+</div></header>
+<main>
+
+<section>
+<nav class="toc"><a href="#what">這是什麼</a><a href="#prep">上課前準備</a><a href="#draw">抽籤點名</a><a href="#group">隨機分組</a><a href="#timer">計時器</a><a href="#buzz">搶答器</a><a href="#vote">即時投票</a><a href="#phone">手機連線原理</a><a href="#keys">快捷鍵</a><a href="#faq">常見問題</a><a href="#privacy">隱私與限制</a><a href="#creator">關於創作者</a></nav>
+</section>
+
+<section id="what">
+<h2>這是什麼</h2>
+<p>上課時常用的五個小工具放在同一頁，畫面是黑板（也可以換白板），字很大，適合接投影機。</p>
+<ul>
+<li>🎯 <b>抽籤點名</b>：從名單抽人回答問題，可設定抽過的不再抽。</li>
+<li>👥 <b>隨機分組</b>：指定分幾組或每組幾人，人數最多只差 1 人，可順便抽組長。</li>
+<li>⏱ <b>計時器</b>：倒數（討論、小考）和碼表，最後 10 秒變紅，時間到會響。</li>
+<li>🔔 <b>搶答器</b>：現場按鍵（鍵盤或觸控螢幕）或學生用手機搶答，有犯規判定和計分。</li>
+<li>🗳 <b>匿名即時投票</b>：學生掃 QR code 用手機作答，大螢幕即時顯示長條圖。</li>
+</ul>
+<p>不用註冊、不用安裝。名單只存在老師這台電腦。</p>
+</section>
+
+<section id="prep">
+<h2>上課前準備：班級名單</h2>
+<ol>
+<li>按右上角「📋 名單」。</li>
+<li>把學生名字貼進去，一行一位。從 Excel 複製一整欄直接貼上就可以，逗號、頓號分隔也行。</li>
+<li>沒有名單或不想輸入真名，可以按「產生 1～N 號」，用座號代替。</li>
+<li>可以建好幾個班級，上課時在右側下拉選單切換。</li>
+</ol>
+<p>上課時點名單裡的名字可以標示「今天缺席」，缺席的人不會被抽到也不會被分組；下次上課按「全部出席」恢復。</p>
+<div class="note">名單只存在這台電腦的瀏覽器。換電腦上課前，到「⚙ 常用設定 → 資料備份」下載備份檔，再到教室電腦還原。</div>
+</section>
+
+<section id="draw">
+<h2>🎯 抽籤點名</h2>
+<ul>
+<li>按「🎯 抽籤」或空白鍵，名字會在黑板上快速跳動後停下來。</li>
+<li>「一次 N 人」可以一次抽多位（最多 10 位）。</li>
+<li>勾「抽過的不再抽」：抽過的人會放到右邊「已抽出」，直到按「↺ 重新開始」。點已抽出的名字可以放回籤筒（例如他剛好去洗手間）。</li>
+<li>不勾的話，每次都從全部出席的人裡抽，可能重複抽到同一人。</li>
+</ul>
+</section>
+
+<section id="group">
+<h2>👥 隨機分組</h2>
+<ul>
+<li>選「分成幾組」或「每組幾人」，按「🎲 分組」或空白鍵。</li>
+<li>除不盡時，各組人數最多只差 1 人（例如 23 人分 4 組＝6、6、6、5）。</li>
+<li>勾「每組抽一位組長」，每組第一位會標上 ★組長。</li>
+<li>「📋 複製結果」可以貼到 LINE 群組或教學平台。結果會保留到下次分組。</li>
+</ul>
+</section>
+
+<section id="timer">
+<h2>⏱ 計時器</h2>
+<h3>倒數</h3>
+<ul>
+<li>點右邊快速設定（30 秒～30 分）或自訂分秒，按「▶ 開始」或空白鍵。</li>
+<li>計時中可以按「＋1 分／−1 分」臨時加減時間。</li>
+<li>剩 1 分鐘（或剩四分之一）數字變黃，最後 10 秒變紅並跳動；可勾選「最後 5 秒嗶聲」。</li>
+<li>時間到會響鈴，數字閃爍並開始顯示超時多久（＋00:12）。按「✔ 知道了」回到原本的時間。</li>
+</ul>
+<h3>碼表</h3>
+<p>開始／暫停／分段，分段時間列在右邊。適合計算報告時間。</p>
+<p>切換到其他工具時計時不會停，右上角會出現黃色小標顯示剩餘時間，點它就回到計時器。</p>
+</section>
+
+<section id="buzz">
+<h2>🔔 搶答器</h2>
+<h3>🖥 現場按鍵（最公平）</h3>
+<ol>
+<li>設定 2～6 隊，可以改隊名。</li>
+<li>按「▶ 開始搶答」或空白鍵，黑板顯示「3、2、1」後出現「搶答！」。</li>
+<li>各隊按自己的數字鍵 <kbd>1</kbd>～<kbd>6</kbd>，或直接按螢幕上的色塊（觸控螢幕、互動白板）。</li>
+<li>最快的隊伍放大顯示，後面依序列出慢了幾秒。</li>
+<li><b>倒數期間先按＝犯規</b>，這一輪不能搶。</li>
+<li>每隊下方有 ＋／− 計分。</li>
+</ol>
+<h3>📱 手機搶答</h3>
+<ol>
+<li>先「開放手機連線」（見下方即時投票），學生掃 QR code。</li>
+<li>學生第一次會被要求輸入名字或組別，大螢幕會顯示這個名字。</li>
+<li>老師按「開始搶答」，倒數結束時手機才出現大紅鈕「搶！」。</li>
+<li>大螢幕依收到的順序列出名字和相差秒數。</li>
+</ol>
+<div class="note">手機搶答的先後以老師電腦收到的時間為準，同學的網路快慢會影響結果，比較適合熱鬧、不計分的場合。</div>
+</section>
+
+<section id="vote">
+<h2>🗳 匿名即時投票</h2>
+<h3>1. 開放手機連線</h3>
+<p>按右側「📱 開放手機連線」，畫面會出現 6 碼代碼和 QR code。學生用手機相機掃描就能進入作答頁，不用下載 App、不用登入。也可以打開網站自己輸入代碼。</p>
+<p>還沒出題時，大黑板上會顯示大大的 QR code，方便全班一起掃。右上角綠色小標顯示目前連線人數。</p>
+<p>代碼會記住，重新整理或明天再開，同一個代碼繼續用；想換就按「換代碼」。</p>
+<h3>2. 出題</h3>
+<div class="tw"><table>
+<tr><th>題型</th><th>學生手機看到</th><th>適合</th></tr>
+<tr><td>單選</td><td>A～H 選項（2～8 個）</td><td>觀念題、意見調查</td></tr>
+<tr><td>多選</td><td>可以選好幾個再按「送出」</td><td>「以下哪些是…」</td></tr>
+<tr><td>是非</td><td>⭕ 是／❌ 否</td><td>暖身、快速確認</td></tr>
+<tr><td>1–5 分</td><td>1～5 分，大螢幕算平均</td><td>課程回饋、自評</td></tr>
+<tr><td>懂了嗎</td><td>😀 懂了／🤔 有點懂／😵 不懂</td><td>講完一段馬上確認</td></tr>
+</table></div>
+<p>按「▶ 開始投票」。題目和選項文字會同步到學生手機（題目最多約 54 字、每個選項約 22 字，太長會截短，完整內容看大螢幕）。</p>
+<h3>3. 投票中</h3>
+<ul>
+<li>長條圖即時跳動，顯示票數與百分比、已作答人數。</li>
+<li>「🙈 隱藏結果」：先不公布，避免大家跟著多數選；黑板只顯示已作答人數。</li>
+<li>學生截止前可以改答案，同一支手機重新整理不會重複計票。</li>
+<li>「⏹ 截止」後就不再收票；「▶ 重新開放」可以再開。</li>
+<li>「✔ 設定答案」：截止後學生手機會顯示「答對了／再接再厲」和正確答案。</li>
+<li>「✋ 舉手計票」：教室沒網路時，每個選項旁邊出現 ＋／−，請學生舉手由老師手動加票（沒開連線時預設打開）。</li>
+<li>「➕ 下一題」：這題結果存進右邊「本機紀錄」，可以匯出 CSV。</li>
+</ul>
+</section>
+
+<section id="phone">
+<h2>手機連線原理</h2>
+<p>這個網站放在 GitHub Pages，是純靜態網頁，沒有自己的資料庫。投票與手機搶答借用作者為「創業島」架設的即時轉播站（Cloudflare Worker），每個代碼是一個獨立房間：</p>
+<ul>
+<li>老師電腦把「現在第幾題、幾個選項、開放或截止」這類代碼送進房間。</li>
+<li>學生手機只送「選了 B」這樣的代號；手機搶答時才多送學生自己輸入的暱稱。</li>
+<li>轉播站只負責轉送，不寫入任何儲存；大家離開房間就消失。計票在老師電腦上進行，結果只存在老師的瀏覽器。</li>
+<li>轉播站會過濾不雅字詞與網址，並限制每人送訊息的頻率。</li>
+</ul>
+</section>
+
+<section id="keys">
+<h2>快捷鍵</h2>
+<div class="tw"><table>
+<tr><th>按鍵</th><th>作用</th></tr>
+<tr><td><kbd>空白鍵</kbd></td><td>抽籤／分組／計時開始暫停／開始搶答（依目前工具）</td></tr>
+<tr><td><kbd>1</kbd>～<kbd>6</kbd></td><td>搶答器現場按鍵：第 1～6 隊</td></tr>
+<tr><td><kbd>R</kbd></td><td>計時器重設</td></tr>
+<tr><td><kbd>F</kbd></td><td>全螢幕（再按一次離開）</td></tr>
+<tr><td><kbd>Esc</kbd></td><td>關閉彈出視窗</td></tr>
+</table></div>
+<p>使用簡報筆時，多數簡報筆的「下一頁」鍵送出的是方向鍵或 PageDown，不會觸發；可以用滑鼠點按鈕。</p>
+</section>
+
+<section id="faq">
+<h2>常見問題</h2>
+<h3>學生掃了 QR code 打不開？</h3>
+<p>確認學生手機有網路。QR code 一律指向線上版網址；如果老師是用本機檔案開啟，學生仍會連到線上版，代碼一樣有效。</p>
+<h3>連線人數比實際人數多？</h3>
+<p>同一位學生用兩個瀏覽器開，會算兩人；關掉的分頁過一會兒才會離開。以「已作答人數」為準。</p>
+<h3>為什麼沒有聲音？</h3>
+<p>瀏覽器規定要先在頁面上點一下才能發聲。另外檢查「⚙ 常用設定 → 音效」和電腦音量。</p>
+<h3>可以用來考試計分嗎？</h3>
+<p>不建議。這是課堂互動用的匿名投票，沒有身分驗證，換瀏覽器就能再投一次。</p>
+<h3>換電腦上課？</h3>
+<p>舊電腦「⚙ 常用設定 → 資料備份 → 下載備份檔」，新電腦「從備份檔還原」。</p>
+</section>
+
+<section id="privacy">
+<h2>隱私與限制</h2>
+<div class="warn">
+<ul>
+<li>名單、分組、投票紀錄、設定都只存在這台電腦的瀏覽器，清除瀏覽器資料就會不見。</li>
+<li>投票與手機搶答需要網路，會經過作者架設的轉播站（只轉送代碼與暱稱、不儲存）。</li>
+<li>「匿名」指畫面上不顯示誰投了什麼；不是加密投票，不適合選舉、計分考試或需要防作弊的場合。</li>
+<li>知道代碼的人都能進房間。不用時按「中斷」，或下次換代碼。</li>
+<li>抽籤與分組用瀏覽器的安全亂數（<code>crypto.getRandomValues</code>），結果無法事後重現，需要紀錄請截圖或複製。</li>
+</ul>
+</div>
+</section>
+
+<section id="creator">
+<h2>關於創作者</h2>
+<div class="mk-creator">
+<style>.mk-creator{line-height:1.75}.mk-creator h3{margin:14px 0 6px;font-size:1.05em}.mk-creator table{width:100%;border-collapse:collapse;font-size:.95em}.mk-creator td,.mk-creator th{text-align:left;padding:5px 6px;border-bottom:1px solid rgba(128,128,128,.3);vertical-align:top}.mk-creator th{white-space:nowrap}.mk-creator ul{margin:4px 0;padding-left:1.4em}.mk-creator .mk-tags{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}.mk-creator .mk-tags span{border:1px solid rgba(128,128,128,.45);border-radius:999px;padding:1px 10px;font-size:.9em}</style>
+<p><b>Mark Tsai（蔡豐全）</b>為深耕創業輔導與數位轉型領域的顧問與講師，長期擔任勞動力發展署創業顧問與多項政府計畫的顧問、業師與評審委員，協助中小企業導入數據分析與 AI 工具、申請政府補助計畫，並具備跨境電商實務與講師培訓的豐富經驗。本工具是其推廣 AI 工具運用於教學與課程情境的作品之一。</p>
+<p>聯絡信箱：<a href="mailto:tsaimark@gmail.com">tsaimark@gmail.com</a></p>
+<h3>專長</h3>
+<div class="mk-tags"><span>銷售數據分析</span><span>AI 工具運用</span><span>政府補助計畫申請</span><span>創業</span><span>跨境電商</span></div>
+<h3>證照</h3>
+<table>
+<thead><tr><th>年度</th><th>證照</th></tr></thead>
+<tbody>
+<tr><td>2013</td><td>青創總會 創業輔導顧問師班</td></tr>
+<tr><td>2014</td><td>青創總會 網路行銷講師培訓班</td></tr>
+<tr><td>2016</td><td>阿里巴巴 P4P 認證講師</td></tr>
+<tr><td>2017</td><td>iCap 訓練規劃與評量職能基準課程</td></tr>
+<tr><td>2023</td><td>iCap 職能導向課程申請認證實作班</td></tr>
+<tr><td>2025</td><td>iPAS AI 應用規劃師－初級</td></tr>
+<tr><td>2025</td><td>新北市社會局 社區數位陪伴員</td></tr>
+</tbody>
+</table>
+<h3>經歷</h3>
+<ul>
+<li>勞動力發展署桃竹苗分署 創業顧問（2017－迄今）</li>
+<li>勞動力發展署（北北基）小型企業人力提升計畫 顧問（2019－迄今）</li>
+<li>勞動力發展署（桃竹苗）小型企業人力提升計畫 顧問（2019－迄今）</li>
+<li>農業部農業科技司「科技農企業雙軸轉型躍升發展」科技計畫 業師（2025－2026）</li>
+<li>勞動力發展署 企業人力資源提升計畫 審查委員（2024）</li>
+<li>勞動力發展署 職前訓練評鑑計畫 委員（2022）</li>
+<li>勞動部桃竹苗分署 桃竹苗區域運籌人力資源整合服務計畫 顧問（2022－2023）</li>
+<li>經濟部中小企業處 SBIR 海選專案 評審委員（2019－2024）</li>
+<li>勞動力發展署 數位學習課程清單審查會議 審查委員（2024－2025）</li>
+<li>輔仁大學創新跨領域學院 課務委員（2024－2025）</li>
+<li>台北市進出口商業同業公會 跨境電商生態村 顧問</li>
+<li>台灣網商協會 顧問</li>
+<li>中華職能開發策進會 顧問（2018－2020）</li>
+<li>新北市汽車美容人員職業工會 顧問（2023－迄今）</li>
+<li>中華網路行銷講師協會 顧問（2022－迄今）</li>
+<li>新北市社企電商基地 輔導顧問（2018－2020）</li>
+<li>阿里巴巴國際站平台 認證講師（2016）</li>
+<li>巨匠電腦 跨境電子商務班 講師（2016－2017）</li>
+</ul>
+</div>
+</section>
+
+</main>
+</body>
+</html>

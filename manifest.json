@@ -1,0 +1,16 @@
+{
+  "name": "講師課堂小幫手",
+  "short_name": "課堂小幫手",
+  "description": "抽籤點名、隨機分組、計時器、搶答器、匿名即時投票，投影上課用",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#1D3A2E",
+  "theme_color": "#1D3A2E",
+  "lang": "zh-TW",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
