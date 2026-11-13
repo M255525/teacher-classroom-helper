@@ -1,5 +1,5 @@
 // 加入主畫面＋離線可用。network-first＋同源快取備援，不快取跨網域請求。
-const CACHE_NAME = 'teacher-classroom-helper-v12';
+const CACHE_NAME = 'teacher-classroom-helper-v13';
 const SHELL_FILES = [
   './',
   './index.html',

@@ -558,12 +558,12 @@ function pump(){
 function onPeerName(id, name){
   const a = String(name || '').split('|');
   const who = cleanWho(a[0] === 'S' ? a[3] : a[0] === 'B' ? a.slice(2).join('|') : a[0] === 'W' ? a[1] : '');
-  if (who) { NET.who.set(id, who); if (isVT() || S.tab === 'buzz') updJoined(); }
+  if (who) { NET.who.set(id, who); if (isVT() || S.tab === 'buzz') updJoined(); const cq = S.vote.cur; if (cq && cq.quiz && cq.state === 'open' && !(cq.seen && cq.seen[who])) { (cq.seen = cq.seen || {})[who] = 1; saveVoteSoon(); } }
   if (a[0] === 'S') {
     const p = S.vote.cur; if (!p || p.state !== 'open' || a[1] !== p.pid) return;
     let ch = String(a[2] || '').toUpperCase().split('').filter((c, i, arr) => LETTERS.indexOf(c) >= 0 && LETTERS.indexOf(c) < p.n && arr.indexOf(c) === i).sort().join('');
     if (p.type !== 'm') ch = ch.slice(0, 1);
-    if (!ch) { delete p.votes[id]; if (p.who) delete p.who[id]; } else { p.votes[id] = ch; if (who) (p.who = p.who || {})[id] = who; }
+    if (!ch) { delete p.votes[id]; if (p.who) delete p.who[id]; } else { p.votes[id] = ch; if (who) (p.who = p.who || {})[id] = who; (p.tms = p.tms || {})[id] = Date.now() - (p.startAt || Date.now()); }
     saveVoteSoon(); if (isVT()) votePaint();
   } else if (a[0] === 'B' && a[1] === B.rid) bzPhone(id, who);
 }
@@ -719,6 +719,8 @@ function vStart(item){
   const n = v.type === 's' || v.type === 'm' ? opts.length : VOTE_TYPES[v.type].labels.length;
   v.cur = {pid:pid4(), type:v.type, q:v.q, opts, n, state:'open', show:true, ans:'', votes:{}, manual:Array(n).fill(0), manualOn:!NET.want, named:S.tab === 'quiz', quiz:S.tab === 'quiz', qid:S.tab === 'quiz' ? S.qs.id : '', qname:S.tab === 'quiz' ? (S.qs.name || S.bank.name || '測驗') : '', who:{}, at:new Date().toLocaleString('zh-TW', {hour12:false})};
   if (item && item.ans) v.cur.ans = item.ans;
+  v.cur.startAt = Date.now();
+  if (v.cur.quiz) { v.cur.seen = {}; NET.peers.forEach((nm, id) => { const w = NET.who.get(id); if (w && !/^T\|/.test(nm)) v.cur.seen[w] = 1; }); }
   saveVote();
   if (NET.want) { NET.q = []; setTeacher(teacherVoteName(v.cur)); queueChats(pollChats(v.cur)); }
   SND.go(); lastStageKey = ''; renderVote();
@@ -731,8 +733,9 @@ function archivePoll(){
 const myPolls = () => { const id = roster().id; return S.polls.filter((h) => (!h.rid || h.rid === id) && !h.quiz); };
 function pollRecord(p){
   const {c, voters} = tally(p), answers = {};
-  if (p.named) Object.keys(p.votes).forEach((id) => { const w = p.who && p.who[id]; if (w) answers[w] = p.votes[id]; });
-  return {pid:p.pid, quiz:!!p.quiz, qid:p.qid || '', qname:p.qname || '', q:p.q, type:VOTE_TYPES[p.type].n, t:p.type, labels:labelsOf(p), c, voters, ans:p.ans ? p.ans.split('').map((L) => labelsOf(p)[LETTERS.indexOf(L)]).join('、') : '', ansL:p.ans || '', named:!!p.named, answers, at:p.at};
+  const times = {};
+  if (p.named) Object.keys(p.votes).forEach((id) => { const w = p.who && p.who[id]; if (w) { answers[w] = p.votes[id]; if (p.tms && p.tms[id] != null) times[w] = p.tms[id]; } });
+  return {pid:p.pid, quiz:!!p.quiz, qid:p.qid || '', qname:p.qname || '', q:p.q, type:VOTE_TYPES[p.type].n, t:p.type, labels:labelsOf(p), c, voters, ans:p.ans ? p.ans.split('').map((L) => labelsOf(p)[LETTERS.indexOf(L)]).join('、') : '', ansL:p.ans || '', named:!!p.named, answers, times, present:Object.keys(p.seen || {}), at:p.at};
 }
 // 成績：記名計分＋有設答案的題目（含目前這題），每位學生一列；姓名用目前班級名單的學號對應
 // 成績：某一場測驗（qid）的題目，每位學生一列（✔／✘＋選了什麼、答對／答錯／未作答、得分），下方每題的答對／答錯／未作答名單
@@ -745,26 +748,41 @@ function quizPolls(qid){
 function scoreRows(qid){
   qid = qid || S.qs.id;
   const qs = quizPolls(qid); if (!qs.length) return null;
-  // answers 的 key 是學生輸入的學號或姓名；依目前名單對應成同一個人
-  const r = roster(), people = {}, order = []; // order：依名單順序（數字學號當物件 key 會被排到最前面）
-  r.list.forEach((n) => { const sid = (r.ids || {})[n] || ''; const k = sid ? cleanStu(sid) : 'N:' + n; if (!people[k]) order.push(k); people[k] = {sid, name:n}; });
-  const qa = qs.map((h) => { const m = {}; Object.keys(h.answers || {}).forEach((w) => { const x = resolveWho(w); if (!people[x.key]) { people[x.key] = {sid:x.sid, name:'', raw:w}; order.push(x.key); } m[x.key] = h.answers[w]; }); return m; });
+  // 只收「這場有登入（出題時在線上）或有作答」的學生；學生輸入的學號或姓名用目前名單對應成同一個人
+  const people = {}, order = [];
+  const add = (w) => { const x = resolveWho(w); if (!people[x.key]) { people[x.key] = {sid:x.sid, name:x.name, raw:w}; order.push(x.key); } return x.key; };
+  const qa = qs.map((h) => { const m = {}, tm = {}; (h.present || []).forEach(add); Object.keys(h.answers || {}).forEach((w) => { const k = add(w); m[k] = h.answers[w]; if (h.times && h.times[w] != null) tm[k] = h.times[w]; }); return {m, tm}; });
+  if (!order.length) return null;
   const show = (h, a) => h.t === 't' ? a.replace('A', 'O').replace('B', 'X') : a;
   const label = (k) => { const pp = people[k]; return pp.name ? (pp.sid ? pp.sid + ' ' : '') + pp.name : pp.raw; };
+  const secs = (ms) => Math.round(ms / 100) / 10;
   const list = order.map((k) => {
-    let ok = 0, bad = 0;
-    const cells = qs.map((h, qi) => { const a = qa[qi][k]; if (!a) return '未作答'; if (a === h.ansL) { ok++; return '✔ 答對（' + show(h, a) + '）'; } bad++; return '✘ 答錯（' + show(h, a) + '）'; });
-    const pp = people[k];
-    return {k, ok, row:[pp.sid, pp.name || '（名單外：' + pp.raw + '）'].concat(cells, [ok, bad, qs.length - ok - bad, qs.length, Math.round(ok / qs.length * 100)])};
-  }).sort((a, b) => b.ok - a.ok || (a.row[0] + a.row[1] > b.row[0] + b.row[1] ? 1 : -1));
-  const rows = [['學號', '姓名'].concat(qs.map((_, i) => '第 ' + (i + 1) + ' 題'), ['答對題數', '答錯題數', '未作答題數', '總題數', '得分（百分制）'])].concat(list.map((o) => o.row));
+    let ok = 0, bad = 0, time = 0;
+    const cells = qs.map((h, qi) => { const a = qa[qi].m[k]; if (!a) return '未作答'; time += qa[qi].tm[k] || 0; if (a === h.ansL) { ok++; return '✔ 答對（' + show(h, a) + '）'; } bad++; return '✘ 答錯（' + show(h, a) + '）'; });
+    const pp = people[k], score = Math.round(ok / qs.length * 100);
+    return {k, ok, bad, score, time, answered:ok + bad, name:pp.name, raw:pp.raw, sid:pp.sid, cells};
+  }).sort((a, b) => b.score - a.score || (a.answered && b.answered ? a.time - b.time : b.answered - a.answered) || (label(a.k) > label(b.k) ? 1 : -1));
+  // 名次：分數一樣看作答時間，時間也一樣才同名次
+  list.forEach((o, i) => { const p = list[i - 1]; o.rank = p && p.score === o.score && p.time === o.time ? p.rank : i + 1; });
+  const rows = [['名次', '學號', '姓名'].concat(qs.map((_, i) => '第 ' + (i + 1) + ' 題'), ['答對題數', '答錯題數', '未作答題數', '總題數', '得分（百分制）', '作答時間（秒）'])]
+    .concat(list.map((o) => [o.rank, o.sid, o.name || '（名單外：' + o.raw + '）'].concat(o.cells, [o.ok, o.bad, qs.length - o.ok - o.bad, qs.length, o.score, o.answered ? secs(o.time) : ''])));
+  const bins = scoreBins(list);
+  rows.push([], ['分數分布（每 10 分一組）', '人數']); bins.forEach((b) => rows.push([b.label, b.n]));
+  rows.push([], ['前三名', '學號', '姓名', '得分', '答對題數', '作答時間（秒）']);
+  list.slice(0, 3).forEach((o, i) => rows.push(['第 ' + (i + 1) + ' 名', o.sid, o.name || o.raw, o.score, o.ok + ' / ' + qs.length, o.answered ? secs(o.time) : '']));
   rows.push([], ['題號', '題目', '正確答案', '答對人數', '答錯人數', '答對率', '答對名單', '答錯名單', '未作答名單']);
   qs.forEach((h, i) => {
-    const m = qa[i], keys = order, okL = keys.filter((k) => m[k] && m[k] === h.ansL), badL = keys.filter((k) => m[k] && m[k] !== h.ansL), noL = keys.filter((k) => !m[k]);
+    const m = qa[i].m, okL = order.filter((k) => m[k] && m[k] === h.ansL), badL = order.filter((k) => m[k] && m[k] !== h.ansL), noL = order.filter((k) => !m[k]);
     rows.push(['第 ' + (i + 1) + ' 題', h.q, show(h, h.ansL) + '（' + h.ans + '）', okL.length, badL.length, okL.length + badL.length ? Math.round(okL.length / (okL.length + badL.length) * 100) + '%' : '',
       okL.map(label).join('、'), badL.map((k) => label(k) + '（' + show(h, m[k]) + '）').join('、'), noL.map(label).join('、')]);
   });
-  return {rows, nQ:qs.length, nS:list.filter((o) => o.row.slice(2, 2 + qs.length).some((c) => c !== '未作答')).length, list:list.map((o) => ({k:o.k, ok:o.ok, name:people[o.k].name, raw:people[o.k].raw})), total:qs.length};
+  return {rows, nQ:qs.length, nS:list.length, list, bins, total:qs.length, secs};
+}
+// 每 10 分一組：0–9、10–19、…、90–100
+function scoreBins(list){
+  const bins = Array.from({length:10}, (_, i) => ({label:i === 9 ? '90–100' : i * 10 + '–' + (i * 10 + 9), n:0}));
+  list.forEach((o) => { bins[Math.min(9, Math.floor(o.score / 10))].n++; });
+  return bins;
 }
 function quizSessions(){
   const id = roster().id, seen = {};
@@ -791,7 +809,7 @@ function scoreCard(){
   return '<div class="card"><h3>🏆 本次測驗成績<span class="r">' + (sr ? sr.nQ + ' 題・' + sr.nS + ' 人作答' : '') + '</span></h3>' +
     '<p class="small" style="margin:0 0 .4rem">「' + esc(S.qs.name || '測驗') + '」' + (sr ? '已計分 ' + sr.nQ + ' 題（有設答案的題目；按「下一題」或自動出題換題時記入）。' : '還沒有計分的題目。') + '</p>' +
     (sr && S.quizOpt.reveal === 'end' ? '<div class="row" style="margin-bottom:.4rem"><button class="btn y" data-act="revealAll">📢 公布全部答案（傳到學生手機）</button></div>' : '') +
-    (sr ? '<div class="row"><button class="btn alt" data-act="scCsv">⬇ 成績 CSV</button><button class="btn alt" data-act="scXlsx">⬇ 成績 Excel</button><button class="btn alt" data-act="scBoard">🏅 排行榜</button></div>' : '') +
+    (sr ? '<div class="row"><button class="btn alt" data-act="scCsv">⬇ 成績 CSV</button><button class="btn alt" data-act="scXlsx">⬇ 成績 Excel</button><button class="btn y" data-act="scResults">📊 測驗結果（分數分布＋前三名）</button><button class="btn alt" data-act="scBoard">🏅 排行榜</button></div>' : '') +
     '<div class="row" style="margin-top:.4rem"><button class="btn alt" data-act="quizNew">🆕 開始新測驗</button></div>' +
     (past.length ? '<p class="small" style="margin:.5rem 0 .2rem">之前的測驗（' + esc(roster().name) + '）：</p><ul class="hist">' + past.slice(0, 10).map((s) => '<li><b>' + esc(s.name) + '</b><span class="small">' + esc(s.at) + '・' + s.n + ' 題</span> <button class="ib" data-scq="' + s.qid + '" data-kind="xlsx" style="min-height:2rem">⬇ Excel</button><button class="ib" data-scq="' + s.qid + '" data-kind="csv" style="min-height:2rem">⬇ CSV</button></li>').join('') + '</ul>' : '') + '</div>';
 }
@@ -803,12 +821,32 @@ function scoreExport(kind, qid){
   if (kind === 'csv') download(fn + '.csv', TCHIO.csvText(sr.rows), 'text/csv');
   else downloadBlob(fn + '.xlsx', TCHIO.xlsxBlob(sr.rows, '成績', [14, 12].concat(Array(sr.nQ).fill(14), [10, 10, 10, 10, 14])));
 }
+function nameOf(o){ return o.name ? disp(o.name) : o.raw; }
+// 考完結果：分數分布直條圖（每 10 分一組）＋前三名（分數相同看作答時間）
+function openResults(qid){
+  qid = qid || S.qs.id;
+  const sr = scoreRows(qid); if (!sr) { toast('還沒有成績'); return; }
+  const max = Math.max(1, ...sr.bins.map((b) => b.n)), avg = sr.list.length ? Math.round(sr.list.reduce((a, o) => a + o.score, 0) / sr.list.length) : 0;
+  const s = quizSessions().find((x) => x.qid === qid) || {name:S.qs.name};
+  const chart = '<div style="display:flex;align-items:flex-end;gap:.4rem;height:16rem;padding:.5rem .2rem 0;border-bottom:2px solid var(--line)">' +
+    sr.bins.map((b, i) => '<div style="flex:1 1 0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%">' +
+      '<b style="font-size:1.1rem;font-variant-numeric:tabular-nums">' + (b.n || '') + '</b>' +
+      '<div style="width:100%;max-width:3.2rem;height:' + (b.n / max * 85) + '%;min-height:' + (b.n ? '4px' : '0') + ';background:' + COLORS[i % 5] + ';border-radius:.4rem .4rem 0 0;transition:height .6s"></div></div>').join('') + '</div>' +
+    '<div style="display:flex;gap:.4rem;padding:.25rem .2rem 0">' + sr.bins.map((b) => '<div class="small" style="flex:1 1 0;text-align:center;font-size:.72rem;white-space:nowrap">' + b.label + '</div>').join('') + '</div>';
+  const medal = ['🥇', '🥈', '🥉'];
+  const top = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:.6rem;margin-top:.8rem">' + sr.list.slice(0, 3).map((o, i) =>
+    '<div class="card" style="text-align:center;box-shadow:inset 0 0 0 3px ' + COLORS[i] + '"><div style="font-size:2.2rem">' + medal[i] + '</div><div style="font-family:var(--hand);font-weight:700;font-size:1.5rem">' + esc(nameOf(o)) + '</div>' +
+    '<div style="font-size:1.9rem;font-weight:900;color:' + COLORS[i] + '">' + o.score + ' 分</div><div class="small">答對 ' + o.ok + ' / ' + sr.total + ' 題・作答 ' + (o.answered ? sr.secs(o.time) + ' 秒' : '—') + '</div></div>').join('') + '</div>';
+  openModal('<h2>📊 測驗結果・' + esc(s.name || '測驗') + '</h2><p class="small">共 ' + sr.total + ' 題・' + sr.list.length + ' 人參加・平均 ' + avg + ' 分。分數每 10 分一組；前三名分數相同時，作答時間短的在前（作答時間＝每題從出題到最後一次按答案的秒數加總）。</p>' +
+    chart + '<h3 style="margin-top:1rem">🏆 前三名</h3>' + top +
+    '<div class="stack"><button class="btn alt" data-act="scBoard">🏅 看前十名</button><button class="btn" data-act="close">關閉</button></div>', true);
+}
 function openBoard(){
   const sr = scoreRows(S.qs.id); if (!sr) { toast('還沒有成績'); return; }
-  const top = sr.list.filter((o) => o.ok > 0).slice(0, 10); let rank = 0, last = -1;
-  openModal('<h2>🏅 排行榜・' + esc(S.qs.name || '測驗') + '</h2><p class="small">共 ' + sr.total + ' 題，依答對題數排序（同分同名次）。</p>' +
-    (top.length ? '<ol class="phList" style="list-style:none;padding:0">' + top.map((o, i) => { if (o.ok !== last) { rank = i + 1; last = o.ok; } return '<li>' + (rank <= 3 ? ['🥇', '🥈', '🥉'][rank - 1] : rank + '.') + ' ' + esc(o.name ? disp(o.name) : o.raw) + '<span>答對 ' + o.ok + ' / ' + sr.total + '</span></li>'; }).join('') + '</ol>' : '<p>還沒有人答對。</p>') +
-    '<div class="stack"><button class="btn" data-act="close">關閉</button></div>', true);
+  const top = sr.list.filter((o) => o.answered).slice(0, 10);
+  openModal('<h2>🏅 排行榜・' + esc(S.qs.name || '測驗') + '</h2><p class="small">共 ' + sr.total + ' 題，依分數排序，分數相同時作答時間短的在前。</p>' +
+    (top.length ? '<ol class="phList" style="list-style:none;padding:0">' + top.map((o) => '<li>' + (o.rank <= 3 ? ['🥇', '🥈', '🥉'][o.rank - 1] : o.rank + '.') + ' ' + esc(nameOf(o)) + '<span>' + o.score + ' 分・答對 ' + o.ok + ' / ' + sr.total + '・' + sr.secs(o.time) + ' 秒</span></li>').join('') + '</ol>' : '<p>還沒有人作答。</p>') +
+    '<div class="stack"><button class="btn alt" data-act="scResults">📊 分數分布</button><button class="btn" data-act="close">關閉</button></div>', true);
 }
 function newQuiz(name){ S.qs = {id:'q' + Date.now().toString(36), name:name || S.bank.name || '測驗', at:new Date().toLocaleString('zh-TW', {hour12:false})}; lsPut('quizSess', S.qs); }
 function renderQuiz(){
@@ -869,7 +907,7 @@ async function bankFromFile(f){
   try { const x = await TCHIO.readFile(f), res = x.rows ? TCHIO.rowsToQuiz(x.rows) : TCHIO.parseQuizText(x.text); bankDraft = Object.assign(res, {name:f.name.replace(/\.[^.]+$/, '')}); if (!res.items.length) toast('檔案裡找不到題目，請參考格式說明'); bankModal(); }
   catch (e) { toast(e.message || '讀檔失敗'); }
 }
-function bankUse(){ if (!bankDraft || !bankDraft.items.length) return; S.bank = {name:bankDraft.name || '貼上的題目', items:bankDraft.items.slice(0, 200), used:[], order:null}; lsPut('bank', S.bank); if (!quizPolls(S.qs.id).length) newQuiz(S.bank.name); bankDraft = null; closeModal(); renderVote(); toast('題庫已載入，共 ' + S.bank.items.length + ' 題'); }
+function bankUse(){ if (!bankDraft || !bankDraft.items.length) return; S.bank = {name:bankDraft.name || '貼上的題目', items:bankDraft.items.slice(0, 200), used:[], order:null}; lsPut('bank', S.bank); newQuiz(S.bank.name); bankDraft = null; closeModal(); renderVote(); toast('題庫已載入，共 ' + S.bank.items.length + ' 題'); }
 function quizOptPanel(){
   const o = S.quizOpt, total = S.bank.items.length;
   const seg = (k, v, t) => '<button data-qopt="' + k + '" data-v="' + v + '" aria-pressed="' + (String(o[k]) === String(v)) + '">' + t + '</button>';
@@ -922,7 +960,7 @@ function autoTick(){
     }
   } else if (AUTO.phase === 'reveal' && now >= AUTO.until) {
     const i = nextBankIdx();
-    if (i < 0) { archivePoll(); S.vote.cur = null; saveVote(); if (NET.want) setTeacher('T|w'); lastStageKey = ''; autoStop('🎉 這輪題目全部出完了'); if (S.quizOpt.reveal === 'end') revealAll(); return; }
+    if (i < 0) { archivePoll(); S.vote.cur = null; saveVote(); if (NET.want) setTeacher('T|w'); lastStageKey = ''; autoStop('🎉 這輪題目全部出完了'); if (S.quizOpt.reveal === 'end') revealAll(); setTimeout(() => openResults(), 600); return; }
     autoAsk(i);
   }
   autoPaint();
@@ -1147,7 +1185,7 @@ document.addEventListener('click', (e) => {
     vCsv: () => download('課堂投票紀錄-' + new Date().toLocaleDateString('sv') + '.csv', pollCsv(), 'text/csv'),
     vClearHist: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定清除？'; return; } const id = roster().id; S.polls = lsJson('polls', []).filter((h) => h.rid && h.rid !== id); lsPut('polls', S.polls); renderVote(); },
     vSend: () => { if (JS.picks) voteSend(JS.pid, JS.picks); renderJoin(); },
-    scCsv: () => scoreExport('csv'), scXlsx: () => scoreExport('xlsx'), scBoard: openBoard,
+    scCsv: () => scoreExport('csv'), scXlsx: () => scoreExport('xlsx'), scBoard: openBoard, scResults: () => openResults(),
     quizNew: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定開始新測驗？（成績另外記，題庫從頭出）'; return; } autoStop(); if (S.vote.cur && S.vote.cur.quiz) { archivePoll(); S.vote.cur = null; saveVote(); if (NET.want) setTeacher('T|w'); } newQuiz(); S.bank.used = []; lsPut('bank', S.bank); renderTool(); toast('已開始新測驗：' + S.qs.name); },
     bankOpen: () => { bankDraft = null; bankModal(); }, bankPick: () => $('bankFile').click(), bankUse,
     bankParse: () => { const r = TCHIO.parseQuizText($('bankText').value); bankDraft = Object.assign(r, {name:'貼上的題目'}); if (!r.items.length) toast('找不到題目，請參考格式說明'); const keep = $('bankText').value; bankModal(); $('bankText').value = keep; },
@@ -1171,7 +1209,7 @@ document.addEventListener('click', (e) => {
     bankEditOk: () => { const i = +d.i, a = Array.from(document.querySelectorAll('[data-ans-pick][aria-pressed="true"]')).map((b) => b.dataset.ansPick).join(''); const q = S.bank.items[i]; if (!q) return; if (q.type === 't' && a.length > 1) { toast('是非題只能選一個'); return; }
       bankSetAns(i, a); const p = S.vote.cur; if (p && p.bankIdx === i && p.quiz) { p.ans = q.type === 's' ? a.slice(-1) : a; if (q.type === 'm' && p.type === 's') p.type = 'm'; saveVote(); if (p.state !== 'open') setTeacher(teacherVoteName(p)); lastStageKey = ''; votePaint(); }
       closeModal(); renderVote(); toast(a ? '答案已存進題庫' : '已清除答案'); },
-    bankReset: () => { autoStop(); reorderBank(S.quizOpt.order === 'rand' ? '已重新洗牌，從頭開始' : '從頭開始'); renderVote(); },
+    bankReset: () => { autoStop(); if (quizPolls(S.qs.id).length) newQuiz(S.qs.name); reorderBank((S.quizOpt.order === 'rand' ? '已重新洗牌，' : '') + '開始新的一場測驗'); renderVote(); },
     bankClear: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定清空題庫？'; return; } S.bank = {name:'', items:[], used:[], order:[]}; lsPut('bank', S.bank); renderVote(); },
     whoEdit: () => { JS.whoEdit = true; renderJoin(); },
     buzz: () => { const ts = teacherState(); if (!ts || ts[1] !== 'b' || ts[3] !== 'o') return; myName('B|' + ts[2] + '|' + JS.who); if (navigator.vibrate) navigator.vibrate(60); renderJoin(); },
@@ -1271,5 +1309,5 @@ if (JOIN) {
   if (isVT()) renderTool();
   if (!lsGet('warnSeen')) { lsSet('warnSeen', '1'); showWarn(); }
 }
-window._tch = {S, T, B, NET, JS, setTab, doDraw, doGroup, tSet, bzStart, bzHit, tally, pollChats, renderTool, revealAll, nextBankIdx, roundPos, LOB, fetchLobby, AUTO, autoStart, newQuiz, openBoard, importRoster, rosterExport, scoreRows, bankUse, bankFromFile, bankStart, scoreExport, openRoster};
+window._tch = {S, T, B, NET, JS, setTab, doDraw, doGroup, tSet, bzStart, bzHit, tally, pollChats, renderTool, revealAll, openResults, scoreRows, nextBankIdx, roundPos, LOB, fetchLobby, AUTO, autoStart, newQuiz, openBoard, importRoster, rosterExport, scoreRows, bankUse, bankFromFile, bankStart, scoreExport, openRoster};
 })();
