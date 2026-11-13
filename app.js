@@ -416,7 +416,7 @@ function joinUrl(code){
 function netStart(code){
   NET.want = true; NET.code = code; NET.role = JOIN ? 'S' : 'T'; NET.retry = 0;
   if (NET.role === 'T') {
-    ssSet('room', code); lsSet('room', code); // 這個分頁的代碼＋「上次用的代碼」
+    ssSet('room', code); // 只有這個分頁重新整理會沿用；關閉教室後一律換新代碼，舊 QR code 失效
     NET.tkey = lsGet('tkey.' + code); if (!NET.tkey) { NET.tkey = randId() + randId(); lsSet('tkey.' + code, NET.tkey); }
     NET.pw = lsGet('pw.' + code) || '';
   } else { NET.myId = lsGet('sid.' + code) || randId(); lsSet('sid.' + code, NET.myId); NET.pw = lsGet('spw.' + code) || ''; JS.pwNeed = false; }
@@ -433,15 +433,18 @@ function codeBusy(code){
   });
 }
 async function netOpen(){
-  const last = ssGet('room') || lsGet('room');
+  const last = ssGet('room');
   const code = last && /^[A-Z0-9]{6}$/.test(last) && !(await codeBusy(last)) ? last : newCode();
-  if (last && code !== last) toast('上次的代碼正在另一個分頁使用，這個分頁改用新代碼');
   netStart(code); renderTool();
 }
 function netReconnect(){ const ws = NET.ws; NET.ws = null; if (ws) try { ws.close(); } catch (e) {} NET.status = 'off'; NET.retry = 0; netConnect(); }
-function netStop(){
-  NET.want = false; clearTimeout(NET.rt); const ws = NET.ws; NET.ws = null; NET.status = 'off'; NET.peers.clear();
-  if (ws) try { ws.close(); } catch (e) {}
+// closeRoom：老師按「關閉教室」→ 通知轉播站把所有人請出、刪掉這個代碼的金鑰，舊網址與 QR code 從此失效
+function netStop(closeRoom){
+  const code = NET.code, ws0 = NET.ws;
+  if (closeRoom && NET.role === 'T' && ws0 && ws0.readyState === 1) try { ws0.send('{"t":"close"}'); } catch (e) {}
+  NET.want = false; clearTimeout(NET.rt); const ws = NET.ws; NET.ws = null; NET.status = 'off'; NET.peers.clear(); NET.who.clear();
+  if (ws) setTimeout(() => { try { ws.close(); } catch (e) {} }, closeRoom ? 400 : 0);
+  if (closeRoom && code) { ['tkey.', 'pw.', 'vcur.'].forEach((k) => lsDel(k + code)); }
   ssDel('room'); updChips(); if (S.tab === 'vote' || S.tab === 'buzz') renderTool();
 }
 function netConnect(){
@@ -463,6 +466,7 @@ function netConnect(){
     if (NET.ws !== ws) return; NET.status = 'off'; NET.ws = null; clearInterval(NET.ping);
     const code = ev && ev.code;
     if (code === 4003 && NET.role === 'S') { JS.pwNeed = true; NET.retry = 0; renderJoin(); return; } // 密碼不對：等學生輸入
+    if (code === 4004 && NET.role === 'S') { JS.closed = true; NET.retry = 0; renderJoin(); return; } // 教室已關閉或還沒開：不再自動重連
     if (code === 4001 && NET.role === 'T') { toast('這個代碼正由另一台電腦／瀏覽器當老師使用，已改用新代碼'); netStop(); netStart(newCode()); renderTool(); return; }
     if (code === 4002) { NET.myId = randId(); if (NET.role === 'S') lsSet('sid.' + NET.code, NET.myId); }
     netPaint(); netRetry();
@@ -522,7 +526,7 @@ function netCard(){
   return '<div class="card joinCard"><h3><span class="dot ' + (NET.status === 'on' ? 'on' : NET.status === 'off' ? 'bad' : '') + '" id="netDot"></span> 手機連線<span class="r" id="netCnt">' + (NET.status === 'on' ? studentCount() + ' 人' : '連線中⋯') + '</span></h3>' +
     '<div class="small">代碼</div><div class="joinCode">' + NET.code + '</div>' + (NET.pw ? '<div class="small">🔒 密碼 <b style="font-size:1.3rem;color:var(--y);letter-spacing:.1em">' + esc(NET.pw) + '</b>（掃 QR code 會自動帶入）</div>' : '') + '<div class="qr" id="qrSide"></div><div class="joinUrl">' + esc(url) + '</div>' +
     (local ? '<p class="small" style="text-align:left">目前不是線上版網址，QR code 指向線上版：' + esc(ONLINE) + '</p>' : '') +
-    '<div class="row c" style="margin-top:.5rem"><button class="btn alt" data-act="qrBig">🔍 放大 QR</button><button class="btn alt" data-act="copyJoin">🔗 複製連結</button><button class="btn alt" data-act="netNew">換代碼</button><button class="btn alt" data-act="netOff">中斷</button></div>' +
+    '<div class="row c" style="margin-top:.5rem"><button class="btn alt" data-act="qrBig">🔍 放大 QR</button><button class="btn alt" data-act="copyJoin">🔗 複製連結</button><button class="btn alt" data-act="netNew">換代碼</button><button class="btn red" data-act="netOff">🚪 關閉教室</button></div>' +
     '<div class="row c" style="margin-top:.5rem"><input class="tx" id="netPw" maxlength="8" placeholder="教室密碼（選填）" value="' + esc(NET.pw) + '" style="width:9.5rem;text-transform:uppercase" aria-label="教室密碼"><button class="btn alt" data-act="netPw">🔒 ' + (NET.pw ? '改密碼' : '設密碼') + '</button></div>' +
     '<div class="small" id="netJoined" style="margin-top:.5rem">' + joinedSummary() + '</div>' +
     '<p class="small" style="text-align:left;margin:.3rem 0 0">學生進來要先輸入學號或姓名。只有知道代碼和密碼的人能加入；改密碼後已加入的學生要重新輸入。學生之間看不到彼此的作答。</p></div>';
@@ -815,6 +819,12 @@ function renderJoin(){
       '<form class="codeIn" id="codeForm"><input class="tx" id="codeIn" maxlength="6" autocomplete="off" autocapitalize="characters" inputmode="text" aria-label="代碼"><button class="btn y">加入</button></form></div>' + joinFoot() + '</div>';
     return;
   }
+  if (JS.closed) {
+    root.innerHTML = '<div class="join"><div class="jHead"><div class="brand"><img src="icons/icon-192.png" alt=""><span>課堂小幫手</span></div><div class="r"><span class="dot bad"></span>' + NET.code + '</div></div><div class="jMain"><div class="jWait"><span class="big">🚪</span>這間教室已關閉，<br>或老師還沒開放</div>' +
+      '<p class="jWait" style="font-size:1rem">舊的網址和 QR code 在老師關閉教室後就不能用了，請掃描老師現在畫面上的 QR code。</p>' +
+      '<div class="row c"><button class="btn alt" data-act="joinRetry">🔄 再試一次</button><button class="btn y" data-act="joinNew">⌨ 輸入新代碼</button></div></div>' + joinFoot() + '</div>';
+    return;
+  }
   if (JS.pwNeed) {
     root.innerHTML = '<div class="join"><div class="jHead"><div class="brand"><img src="icons/icon-192.png" alt=""><span>課堂小幫手</span></div><div class="r"><span class="dot bad"></span>' + NET.code + '</div></div><div class="jMain"><div class="jQ">🔒 這間教室要密碼</div>' +
       '<form class="codeIn" id="pwForm"><input class="tx" id="pwIn" maxlength="8" autocomplete="off" autocapitalize="characters" aria-label="教室密碼"><button class="btn y">進入</button></form>' + (NET.pw ? '<p class="jWait" style="font-size:1rem">密碼不對，請再看一次大螢幕。</p>' : '') + '</div>' + joinFoot() + '</div>';
@@ -944,8 +954,10 @@ document.addEventListener('click', (e) => {
     bzStart, bzReset, bzZero: () => { S.buzz.teams.forEach((x) => { x.s = 0; }); lsPut('buzz', S.buzz); bzPaint(); },
     netOn: netOpen,
     netPw: () => { const v = $('netPw').value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8); NET.pw = v; if (v) lsSet('pw.' + NET.code, v); else lsDel('pw.' + NET.code); netReconnect(); renderTool(); toast(v ? '密碼已設為 ' + v : '已取消密碼'); },
-    netOff: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定中斷？'; return; } netStop(); },
-    netNew: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定換？學生要重新掃'; return; } netStop(); netStart(newCode()); renderTool(); },
+    netOff: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定關閉？舊 QR code 會失效'; return; } autoStop(); netStop(true); toast('教室已關閉，舊的網址與 QR code 已失效'); },
+    netNew: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定換？舊代碼會失效、學生要重新掃'; return; } autoStop(); netStop(true); netStart(newCode()); renderTool(); },
+    joinRetry: () => { JS.closed = false; renderJoin(); netReconnect(); },
+    joinNew: () => { JS.closed = false; netStop(); history.replaceState(null, '', location.pathname + '?join'); renderJoin(); },
     qrBig: () => { openModal('<div class="qrBig"><h2>📱 掃描加入</h2><div class="qr" id="qrModal"></div><div class="joinCode" style="font-size:3.4rem">' + NET.code + '</div><div class="joinUrl">' + esc(joinUrl(NET.code)) + '</div><button class="btn" data-act="close">關閉</button></div>', true); drawQR($('qrModal'), Math.min(420, innerWidth - 90, innerHeight - 280)); },
     joinedList: openJoined, joinedCsv,
     copyJoin: () => copyText(joinUrl(NET.code)),
