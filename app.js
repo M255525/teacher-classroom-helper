@@ -486,7 +486,7 @@ function netStop(closeRoom){
   if (closeRoom && NET.role === 'T' && ws0 && ws0.readyState === 1) try { ws0.send('{"t":"close"}'); } catch (e) {}
   NET.want = false; clearTimeout(NET.rt); const ws = NET.ws; NET.ws = null; NET.status = 'off'; NET.peers.clear(); NET.who.clear();
   if (ws) setTimeout(() => { try { ws.close(); } catch (e) {} }, closeRoom ? 400 : 0);
-  if (closeRoom && code) { ['tkey.', 'pw.', 'vcur.', 'rinfo.'].forEach((k) => lsDel(k + code)); setTimeout(fetchLobby, 1500); }
+  if (closeRoom && code) { ['tkey.', 'pw.', 'vcur.', 'rinfo.', 'kicked.'].forEach((k) => lsDel(k + code)); setTimeout(fetchLobby, 1500); }
   ssDel('room'); updChips(); if (isVT() || S.tab === 'buzz') renderTool();
 }
 function netConnect(){
@@ -508,6 +508,7 @@ function netConnect(){
     if (NET.ws !== ws) return; NET.status = 'off'; NET.ws = null; clearInterval(NET.ping);
     const code = ev && ev.code;
     if (code === 4003 && NET.role === 'S') { JS.pwNeed = true; NET.retry = 0; renderJoin(); return; } // 密碼不對：等學生輸入
+    if (code === 4005 && NET.role === 'S') { JS.kicked = true; NET.retry = 0; renderJoin(); return; } // 被老師請出教室：不再自動重連
     if (code === 4004 && NET.role === 'S') { JS.closed = true; NET.retry = 0; renderJoin(); return; } // 教室已關閉或還沒開：不再自動重連
     if (code === 4001 && NET.role === 'T') { toast('這個代碼正由另一台電腦／瀏覽器當老師使用，已改用新代碼'); netStop(); netStart(newCode()); renderTool(); return; }
     if (code === 4002) { NET.myId = randId(); if (NET.role === 'S') lsSet('sid.' + NET.code, NET.myId); }
@@ -523,6 +524,12 @@ function onNet(m){
     NET.peers.clear(); (m.peers || []).forEach((p) => NET.peers.set(p.id, String(p.name || '')));
     if (NET.role === 'T') NET.peers.forEach((n, id) => onPeerName(id, n));
     else { NET.peers.forEach((n, id) => { if (/^T\|/.test(n)) JS.tid = id; }); (m.chat || []).forEach(onChat); }
+  } else if ((m.t === 'kicked' || m.t === 'unkicked') && NET.role === 'T') {
+    const k = kickedOf();
+    if (m.t === 'kicked') { k[m.id] = NET.who.get(m.id) || k[m.id] || ''; toast('已請出教室：' + (k[m.id] ? whoLabel(k[m.id]) : '這位學生')); }
+    else { const w = k[m.id]; delete k[m.id]; toast('已恢復：' + (w ? whoLabel(w) : '這位學生') + '，他可以重新加入了'); }
+    lsPut('kicked.' + NET.code, k);
+    if ($('modal').classList.contains('show') && $('modalBox').innerText.indexOf('誰加入了') >= 0) openJoined();
   } else if (m.t === 'room' && NET.role === 'T') {
     const want = roomInfo();
     if (want.name && !m.name) toast('教室名稱含有不適合的字詞，沒有公開到大廳');
@@ -630,14 +637,19 @@ const whoLabel = (w) => { const x = resolveWho(w); return x.name ? disp(x.name) 
 function joinedList(){ const out = []; NET.peers.forEach((nm, id) => { if (/^T\|/.test(nm)) return; const w = NET.who.get(id); out.push({id, who:w || '', x:w ? resolveWho(w) : null}); }); return out; }
 function updJoined(){ const el = $('netJoined'); if (el) el.innerHTML = joinedSummary(); }
 function joinedSummary(){ if (!NET.want) return ''; const L = joinedList(), inRoster = new Set(L.filter((o) => o.x && o.x.name).map((o) => o.x.name)); return '👥 已加入 ' + L.length + ' 人（名單內 ' + inRoster.size + ' / ' + roster().list.length + '）<button class="ib" data-act="joinedList" style="min-height:1.9rem;margin-left:.3rem">看名單</button>'; }
+// 誰加入了＋踢出教室：每位在線學生一個「🚫 踢出」，被踢的人列在下面可以「恢復」
+const kickedOf = () => lsJson('kicked.' + NET.code, {});
 function openJoined(){
-  const L = joinedList(), here = new Set(), r = roster();
+  const L = joinedList(), here = new Set(), r = roster(), kicked = kickedOf();
   const known = L.filter((o) => o.x && o.x.name).map((o) => { here.add(o.x.name); return o; }), unknown = L.filter((o) => !o.x || !o.x.name), absent = r.list.filter((n) => !here.has(n));
   const chip = (t, cls) => '<span class="nm' + (cls || '') + '" style="display:inline-block;margin:.15rem">' + esc(t) + '</span>';
-  openModal('<h2>👥 誰加入了（' + esc(r.name) + '）</h2><p class="small">比對目前選的班級名單（學號或姓名）。這份是即時連線狀態，學生關掉網頁就會離開。</p>' +
-    '<h3>✅ 已加入 ' + known.length + ' 人</h3><div>' + (known.map((o) => chip(disp(o.x.name), ' hit')).join('') || '<span class="small">還沒有</span>') + '</div>' +
-    (unknown.length ? '<h3 style="margin-top:.7rem">❓ 名單外 ' + unknown.length + ' 人</h3><div>' + unknown.map((o) => chip(o.who || '（還沒輸入）')).join('') + '</div><p class="small">可能打錯字、用了別的稱呼，或不是這班的人。</p>' : '') +
+  const row = (o, label, cls) => '<span class="nm' + (cls || '') + '" style="display:inline-flex;align-items:center;gap:.3rem;margin:.15rem">' + esc(label) + '<button class="ib" data-kick="' + esc(o.id) + '" title="請出教室" style="min-height:1.6rem;min-width:0;padding:0 .35rem;font-size:.75rem;background:var(--r);color:#2A0705">🚫 踢出</button></span>';
+  const kk = Object.keys(kicked);
+  openModal('<h2>👥 誰加入了（' + esc(r.name) + '）</h2><p class="small">比對目前選的班級名單（學號或姓名）。這份是即時連線狀態，學生關掉網頁就會離開。按「🚫 踢出」（再按一次確認）可以把人請出教室，他的手機會顯示「已被老師請出」，同一支手機不能再進來。</p>' +
+    '<h3>✅ 已加入 ' + known.length + ' 人</h3><div>' + (known.map((o) => row(o, disp(o.x.name), ' hit')).join('') || '<span class="small">還沒有</span>') + '</div>' +
+    (unknown.length ? '<h3 style="margin-top:.7rem">❓ 名單外 ' + unknown.length + ' 人</h3><div>' + unknown.map((o) => row(o, o.who || '（還沒輸入）')).join('') + '</div><p class="small">可能打錯字、用了別的稱呼，或不是這班的人。</p>' : '') +
     '<h3 style="margin-top:.7rem">⬜ 還沒加入 ' + absent.length + ' 人</h3><div>' + (absent.map((n) => chip(disp(n), ' out')).join('') || '<span class="small">全到了 🎉</span>') + '</div>' +
+    (kk.length ? '<h3 style="margin-top:.7rem">🚫 已踢出 ' + kk.length + ' 人</h3><div>' + kk.map((id) => '<span class="nm out" style="display:inline-flex;align-items:center;gap:.3rem;margin:.15rem;text-decoration:none">' + esc(kicked[id] ? whoLabel(kicked[id]) : '（未具名）') + '<button class="ib" data-unkick="' + esc(id) + '" style="min-height:1.6rem;min-width:0;padding:0 .35rem;font-size:.75rem">↩ 恢復</button></span>').join('') + '</div>' : '') +
     '<div class="stack"><button class="btn alt" data-act="joinedCsv">⬇ 下載點名 CSV</button><button class="btn" data-act="close">關閉</button></div>', true);
 }
 function joinedCsv(){
@@ -1011,6 +1023,10 @@ function renderJoin(){
     paintLobby(); startLobby();
     return;
   }
+  if (JS.kicked) {
+    root.innerHTML = '<div class="join"><div class="jHead"><div class="brand"><img src="icons/icon-192.png" alt=""><span>課堂小幫手</span></div><div class="r"><span class="dot bad"></span>' + NET.code + '</div></div><div class="jMain"><div class="jWait"><span class="big">🚫</span>你已被老師請出這間教室</div><p class="jWait" style="font-size:1rem">如果是誤會，請直接跟老師說，老師可以讓你重新加入。</p><div class="row c"><button class="btn alt" data-act="joinRetry">🔄 老師說可以了，再試一次</button></div></div>' + joinFoot() + '</div>';
+    return;
+  }
   if (JS.closed) {
     root.innerHTML = '<div class="join"><div class="jHead"><div class="brand"><img src="icons/icon-192.png" alt=""><span>課堂小幫手</span></div><div class="r"><span class="dot bad"></span>' + NET.code + '</div></div><div class="jMain"><div class="jWait"><span class="big">🚪</span>這間教室已關閉，<br>或老師還沒開放</div>' +
       '<p class="jWait" style="font-size:1rem">舊的網址和 QR code 在老師關閉教室後就不能用了，請掃描老師現在畫面上的 QR code。</p>' +
@@ -1138,6 +1154,8 @@ document.addEventListener('click', (e) => {
   if (d.man != null) { const p = S.vote.cur; if (!p) return; p.manual[+d.man] = Math.max(0, (p.manual[+d.man] || 0) + (+d.d)); saveVoteSoon(); votePaint(); return; }
   if (d.vote) { joinPick(d.vote); return; }
   if (d.bank != null) { bankStart(+d.bank); return; }
+  if (d.kick) { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定踢出？'; return; } if (!send({t:'kick', id:d.kick})) toast('連線中斷，請稍後再試'); return; }
+  if (d.unkick) { if (!send({t:'unkick', id:d.unkick})) toast('連線中斷，請稍後再試'); return; }
   if (d.qopt) { const k = d.qopt; S.quizOpt[k] = k === 'n' ? +d.v : d.v; lsPut('quizOpt', S.quizOpt);
     if (k !== 'reveal') { autoStop(); reorderBank(k === 'order' ? (d.v === 'rand' ? '改成隨機出題，從頭開始' : '改成依序出題，從頭開始') : '這輪出全部題目，從頭開始'); }
     else { const p = S.vote.cur; if (p && p.quiz) { setTeacher(teacherVoteName(p)); lastStageKey = ''; votePaint(); } }
@@ -1167,7 +1185,7 @@ document.addEventListener('click', (e) => {
     netPw: () => { const v = $('netPw').value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8); NET.pw = v; if (v) lsSet('pw.' + NET.code, v); else lsDel('pw.' + NET.code); netReconnect(); renderTool(); toast(v ? '密碼已設為 ' + v : '已取消密碼'); },
     netOff: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定關閉？舊 QR code 會失效'; return; } autoStop(); netStop(true); toast('教室已關閉，舊的網址與 QR code 已失效'); },
     netNew: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定換？舊代碼會失效、學生要重新掃'; return; } autoStop(); netStop(true); netStart(newCode()); renderTool(); },
-    joinRetry: () => { JS.closed = false; renderJoin(); netReconnect(); },
+    joinRetry: () => { JS.closed = false; JS.kicked = false; renderJoin(); netReconnect(); },
     joinNew: () => { JS.closed = false; netStop(); history.replaceState(null, '', location.pathname + '?join'); renderJoin(); },
     qrBig: () => { openModal('<div class="qrBig"><h2>📱 掃描加入</h2><div class="qr" id="qrModal"></div><div class="joinCode" style="font-size:3.4rem">' + NET.code + '</div><div class="joinUrl">' + esc(joinUrl(NET.code)) + '</div><button class="btn" data-act="close">關閉</button></div>', true); drawQR($('qrModal'), Math.min(420, innerWidth - 90, innerHeight - 280)); },
     joinedList: openJoined, joinedCsv,
@@ -1309,5 +1327,5 @@ if (JOIN) {
   if (isVT()) renderTool();
   if (!lsGet('warnSeen')) { lsSet('warnSeen', '1'); showWarn(); }
 }
-window._tch = {S, T, B, NET, JS, setTab, doDraw, doGroup, tSet, bzStart, bzHit, tally, pollChats, renderTool, revealAll, openResults, scoreRows, nextBankIdx, roundPos, LOB, fetchLobby, AUTO, autoStart, newQuiz, openBoard, importRoster, rosterExport, scoreRows, bankUse, bankFromFile, bankStart, scoreExport, openRoster};
+window._tch = {S, T, B, NET, JS, setTab, doDraw, doGroup, tSet, bzStart, bzHit, tally, pollChats, renderTool, openJoined, revealAll, openResults, scoreRows, nextBankIdx, roundPos, LOB, fetchLobby, AUTO, autoStart, newQuiz, openBoard, importRoster, rosterExport, scoreRows, bankUse, bankFromFile, bankStart, scoreExport, openRoster};
 })();
