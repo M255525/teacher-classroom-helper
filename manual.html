@@ -41,7 +41,7 @@ code{background:var(--bg);border-radius:4px;padding:0 4px}
 <main>
 
 <section>
-<nav class="toc"><a href="#what">這是什麼</a><a href="#prep">上課前準備</a><a href="#draw">抽籤點名</a><a href="#group">隨機分組</a><a href="#timer">計時器</a><a href="#buzz">搶答器</a><a href="#vote">即時投票</a><a href="#phone">手機連線原理</a><a href="#keys">快捷鍵</a><a href="#faq">常見問題</a><a href="#privacy">隱私與限制</a><a href="#creator">關於創作者</a></nav>
+<nav class="toc"><a href="#what">這是什麼</a><a href="#prep">上課前準備</a><a href="#draw">抽籤點名</a><a href="#group">隨機分組</a><a href="#timer">計時器</a><a href="#buzz">搶答器</a><a href="#vote">即時投票</a><a href="#bank">題庫與成績</a><a href="#phone">手機連線原理</a><a href="#keys">快捷鍵</a><a href="#faq">常見問題</a><a href="#privacy">隱私與限制</a><a href="#creator">關於創作者</a></nav>
 </section>
 
 <section id="what">
@@ -61,7 +61,10 @@ code{background:var(--bg);border-radius:4px;padding:0 4px}
 <h2>上課前準備：班級名單</h2>
 <ol>
 <li>按右上角「📋 名單」。</li>
-<li>把學生名字貼進去，一行一位。從 Excel 複製一整欄直接貼上就可以，逗號、頓號分隔也行。</li>
+<li><b>上傳檔案</b>：按「📂 上傳 CSV／Excel」，選有「學號」「姓名」欄的 .xlsx 或 .csv（校務系統匯出的名單通常就可以）。沒有標題列也會依內容自動判斷哪一欄是學號；台灣 Excel 存的 Big5 編碼 CSV 也讀得懂。舊版 .xls 請先在 Excel「另存新檔」成 .xlsx 或 CSV。</li>
+<li><b>或直接貼上</b>：一行一位，「學號 姓名」或只有姓名都可以；從 Excel 複製學號、姓名兩欄貼上也行。</li>
+<li>「投影時顯示」可以選姓名、學號＋姓名，或<b>只顯示學號</b>（不想讓真名出現在投影上時用）。</li>
+<li><b>下載名單</b>：「⬇ 下載 CSV」「⬇ 下載 Excel」，內容有學號、姓名、今天出席，分過組或抽過籤也會附上組別與抽籤順序。下載的檔案也可以當範本，改完再上傳。</li>
 <li>沒有名單或不想輸入真名，可以按「產生 1～N 號」，用座號代替。</li>
 <li>可以建好幾個班級，上課時在右側下拉選單切換。</li>
 </ol>
@@ -152,6 +155,43 @@ code{background:var(--bg);border-radius:4px;padding:0 4px}
 </ul>
 </section>
 
+<section id="bank">
+<h2>📚 題庫與 🏆 成績</h2>
+<h3>匯入題庫</h3>
+<p>即時投票右側「📚 題庫 → 📂 匯入題庫」，可以選 Word（.docx）、Excel（.xlsx）、CSV 或文字檔，也可以直接貼上文字。匯入前會先列出讀到的題目讓你確認。</p>
+<p><b>Word／文字檔</b>照一般考卷寫法即可：</p>
+<pre style="background:#F4F6F1;border-radius:8px;padding:10px;white-space:pre-wrap">1. 下列何者是大型語言模型？
+(A) Excel (B) ChatGPT (C) Word
+答案：B
+
+2. 哪些是 Google 的產品？
+A. Gemini
+B. Claude
+C. NotebookLM
+答案：AC
+
+(X)3. 毛利率越高一定越賺錢。</pre>
+<ul>
+<li>選項可以分行，也可以寫在同一行「(A)… (B)…」。</li>
+<li>答案寫在「答案：」後面，或像考卷一樣寫在題號前「(B)1.」。答案有兩個以上字母＝多選題。</li>
+<li>沒有選項、答案是 O／X（或 是／否、對／錯）＝是非題。</li>
+<li>題號、選項用 Word 的自動編號也讀得到（第一層＝題目，第二層或另一組編號＝選項）。</li>
+<li>沒有選項也沒有是非答案的段落（例如標題、問答題）會略過，並列出來讓你知道。</li>
+</ul>
+<p><b>Excel／CSV</b>：欄位「題目、選項A、選項B…選項H、答案」，可以按「⬇ Excel 範本」下載範本來填。</p>
+<h3>出題</h3>
+<p>按「▶ 出下一題」或某一題的「▶ 出這題」，題目、選項、答案會自動帶入並開始投票。截止後學生手機會顯示答對或答錯。</p>
+<h3>記名計分與成績下載</h3>
+<ol>
+<li>出題前勾「🏆 記名計分」。</li>
+<li>學生第一次作答時手機會要求輸入學號（之後會記住，可以按「改學號」）。</li>
+<li>每題截止、按「➕ 下一題」，結果就記進成績。</li>
+<li>右側「🏆 成績」按「⬇ 成績 CSV」或「⬇ 成績 Excel」：每位學生一列，有各題作答（✔／✘）、答對題數、作答題數、得分（百分制），下面附每題的答對率。</li>
+</ol>
+<div class="note">只有「記名計分」而且有設定答案的題目會算成績。姓名是用目前選的班級名單裡的學號對應，所以名單要有學號欄；學生輸入的學號不在名單裡，會標「名單沒有這個學號」。名單裡沒作答的學生也會列出（0 分）。</div>
+<div class="warn">記名計分不是匿名：學號會經轉播站送到老師電腦。成績檔有學號、姓名與作答，請依個資規定保管。這是課堂練習用，不適合正式考試（沒有身分驗證，學生可以輸入別人的學號）。</div>
+</section>
+
 <section id="phone">
 <h2>手機連線原理</h2>
 <p>這個網站放在 GitHub Pages，是純靜態網頁，沒有自己的資料庫。投票與手機搶答借用作者為「創業島」架設的即時轉播站（Cloudflare Worker），每個代碼是一個獨立房間：</p>
@@ -196,7 +236,8 @@ code{background:var(--bg);border-radius:4px;padding:0 4px}
 <ul>
 <li>名單、分組、投票紀錄、設定都只存在這台電腦的瀏覽器，清除瀏覽器資料就會不見。</li>
 <li>投票與手機搶答需要網路，會經過作者架設的轉播站（只轉送代碼與暱稱、不儲存）。</li>
-<li>「匿名」指畫面上不顯示誰投了什麼；不是加密投票，不適合選舉、計分考試或需要防作弊的場合。</li>
+<li>「匿名」指畫面上不顯示誰投了什麼；不是加密投票，不適合選舉、計分考試或需要防作弊的場合。勾「記名計分」時則不是匿名。</li>
+<li>上傳的名單、題庫檔案只在這台電腦的瀏覽器裡讀取，不會上傳。</li>
 <li>知道代碼的人都能進房間。不用時按「中斷」，或下次換代碼。</li>
 <li>抽籤與分組用瀏覽器的安全亂數（<code>crypto.getRandomValues</code>），結果無法事後重現，需要紀錄請截圖或複製。</li>
 </ul>

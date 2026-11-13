@@ -2,7 +2,7 @@
 
 投影上課用的五合一單頁工具：🎯 抽籤點名、👥 隨機分組、⏱ 計時器（倒數＋碼表）、🔔 搶答器（現場按鍵／手機搶答）、🗳 匿名即時投票（學生掃 QR code 用手機作答）。2026-11-13 建立。
 
-- 純靜態：`index.html`（CSS＋外殼）＋`app.js`（全部邏輯）＋`manual.html`＋PWA。無框架、無建置。
+- 純靜態：`index.html`（CSS＋外殼）＋`io.js`（檔案讀寫與解析）＋`app.js`（畫面邏輯）＋`manual.html`＋PWA。無框架、無建置。
 - 本機預覽 port **8875**（`.claude/launch.json` 的 `teacher-classroom-helper`）。visitor-badge `m255525.teacherclassroomhelper`。
 - 部署：`.github/workflows/pages.yml`（push master 自動部署）。**2026-11-13 已上線** <https://m255525.github.io/teacher-classroom-helper/>（repo 由使用者自己 `gh repo create`；第一次 push 時 Pages 還沒開，run 失敗，開 Pages 後 rerun 成功）。網址（寫死在 `app.js` 的 `ONLINE`，QR code 在非 github.io 網址時一律指向它）。
 
@@ -18,7 +18,7 @@
 - Worker 白名單 Origin：`m255525.github.io`、localhost／127.0.0.1、`null`。用 192.168.x 區網網址開會被擋。
 
 ## 其他
-- localStorage 前綴 `tch.`：`pref`、`rosters`、`cur`、`drawn`、`drawOpt`、`grp`、`timer`、`buzz`、`vote`（含進行中的題目與票數）、`polls`（本機紀錄，最多 100）、`room`、`tab`、`fold`、`warnSeen`、`marquee`、`nick`。備份 JSON `app:'teacher-classroom-helper'` 帶前 10 個鍵。
+- localStorage 前綴 `tch.`：`pref`、`rosters`、`cur`、`drawn`、`drawOpt`、`grp`、`timer`、`buzz`、`vote`（含進行中的題目與票數）、`polls`（本機紀錄，最多 100）、`room`、`tab`、`fold`、`warnSeen`、`marquee`、`nick`、`stuno`、`bank`。備份 JSON `app:'teacher-classroom-helper'` 帶 pref～polls 與 bank。
 - 亂數一律 `crypto.getRandomValues`。音效用 WebAudio 合成（`SND`），不載音檔。QR 用 cdnjs `qrcodejs/1.0.0`，點開時才載入。
 - 學生頁 `?join=CODE`（`JOIN` 模式）只顯示作答介面，不跳首訪警語（頁尾有連結）。
 - 測試掛鉤 `window._tch`。
@@ -26,3 +26,11 @@
 
 ## 標準配備
 跑馬燈（不可關）、⚙ 常用設定（收合式，含關於本工具）、首訪警語＋頁尾入口、`manual.html#creator` 完整版（改 `tools/manual_body.html` 後跑 `tools/build_manual.py`）、PWA（`tools/make_icons.py`；改版升 `service-worker.js` 的 `CACHE_NAME`）、訪客計數器。
+
+## 名單匯入匯出、題庫、記名計分（2026-11-13 使用者要求）
+- **`io.js`（`window.TCHIO`）**：自寫 zip 讀寫（`DecompressionStream('deflate-raw')` 解壓、寫出用不壓縮 zip＋CRC32）→ 讀 .xlsx（sharedStrings／inlineStr、第一個工作表）、.docx（`word/document.xml` 每段一行）、CSV（UTF-8 失敗改 Big5）；寫 .xlsx（含 styles.xml：標題列粗體、凍結首列，已用 openpyxl 與真的 Excel COM 開啟驗證）與 CSV（BOM、0 開頭學號寫成 `="0123"`）。**刻意不用 SheetJS**（cdnjs 只有 0.18.5，有 CVE-2023-30533）；舊版 .xls／.doc 會提示另存。
+- 名單：roster 多 `ids:{姓名:學號}`、`show:'name'|'both'|'id'`（投影顯示，`disp()`）。`rowsToRoster` 欄位優先序 學號＞學員編號／id＞座號（同時有座號與學號時曾抓錯）。名單視窗可上傳、下載 CSV／Excel（附出席、組別、抽籤順序）。
+- 題庫 `tch.bank {name, items:[{q,type,opts,ans}], used:[]}`：`parseQuizText`（題號「1.」「一、」「(B)1.」、選項分行或同行 `(A)…(B)…`、「答案：」、O/X 是非題）、`rowsToQuiz`（題目／選項A～H／答案欄）。**Word 自動編號**：段落 numPr 或樣式（styles.xml）裡的 numPr，第一種 numId:ilvl＝題目（補 `#Q `），其他＝選項（`#O `）。
+- 記名計分：老師勾 `vote.named` → 狀態代碼題型字母改大寫（`T|v|pid|n|S|o|`）；學生手機先要求學號（`tch.stuno`），name 變 `S|pid|選項|學號`（總長 >24 會擋下提示）。老師端 `p.who{peerId:學號}`，`pollRecord()` 存 `answers{學號:選項}`、`ansL`。`scoreRows()`：記名＋有答案的題目（含目前這題），名單有學號的學生全列（沒作答 0 分），依答對數排序，下方附各題答對率。
+- 題目文字現在先送選項 `O…` 再送題目 `Q…`（手機按鈕要用選項文字）。
+- 測試：`node tools/test_io.mjs`（解析器）；瀏覽器用 python-docx／openpyxl 產的真檔案＋Big5 CSV 測過。

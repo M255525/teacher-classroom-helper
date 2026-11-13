@@ -56,11 +56,13 @@ const S = {
   buzz: Object.assign({src:'local', count:4, teams:null}, lsJson('buzz', {})),
   vote: Object.assign({type:'s', q:'', opts:'', cur:null}, lsJson('vote', {})),
   polls: lsJson('polls', []),
+  bank: Object.assign({name:'', items:[], used:[]}, lsJson('bank', {})),
 };
 if (!TABS.some((t) => t.id === S.tab)) S.tab = 'draw';
 if (!S.buzz.teams) S.buzz.teams = Array.from({length:6}, (_, i) => ({n:'第 ' + (i + 1) + ' 組', s:0}));
 const saveRosters = () => { lsPut('rosters', S.rosters); lsSet('cur', S.cur); };
 const roster = () => S.rosters.find((r) => r.id === S.cur) || S.rosters[0];
+const disp = (n, r) => { r = r || roster(); const id = (r.ids || {})[n], m = r.show || 'name'; return !id || m === 'name' ? n : m === 'id' ? id : id + ' ' + n; };
 const present = (r) => { r = r || roster(); const ab = new Set(r.absent || []); return r.list.filter((n) => !ab.has(n)); };
 
 /* ---------- 音效（WebAudio 合成，不載入音檔） ---------- */
@@ -90,6 +92,7 @@ function closeModal(){ $('modal').classList.remove('show'); }
 let toastT = 0;
 function toast(m){ const o = document.querySelector('.toast'); if (o) o.remove(); const t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); t.textContent = m; document.body.appendChild(t); clearTimeout(toastT); toastT = setTimeout(() => t.remove(), 3000); }
 function copyText(s){ (navigator.clipboard ? navigator.clipboard.writeText(s) : Promise.reject()).then(() => toast('已複製')).catch(() => { const ta = document.createElement('textarea'); ta.value = s; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); toast('已複製'); } catch (e) { toast('複製失敗，請手動選取'); } ta.remove(); }); }
+function downloadBlob(name, blob){ const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 800); }
 function download(name, text, type){ const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], {type})); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }
 function applyPref(){ const h = document.documentElement; h.dataset.theme = S.pref.theme === 'white' ? 'white' : 'board'; h.dataset.fs = S.pref.fs; document.querySelector('meta[name=theme-color]').content = S.pref.theme === 'white' ? '#F6F7F3' : '#1D3A2E'; }
 const savePref = () => { lsPut('pref', S.pref); applyPref(); };
@@ -108,6 +111,8 @@ const WARN_HTML = '<h2>⚠ 使用警語</h2><ul>' +
   '<li><b>名單只存在這台電腦的瀏覽器</b>，不會上傳。換電腦前請到「⚙ 常用設定 → 資料備份」下載備份檔。</li>' +
   '<li>抽籤與分組用瀏覽器的安全亂數，每次結果不同、無法事後重現；要留紀錄請自己截圖或複製。</li>' +
   '<li>「即時投票」與「手機搶答」會透過作者架設的轉播站（Cloudflare）即時轉送<b>房間代碼、選項代號與學生自己輸入的暱稱</b>，不會傳名單姓名；轉播站不儲存，所有人離開房間就消失。投票結果只存在老師這台電腦。</li>' +
+  '<li>勾選「🏆 記名計分」時<b>不是匿名</b>：學生的學號會經轉播站送到老師電腦，成績檔含學號、姓名與每題作答，請依個資規定保管。</li>' +
+  '<li>上傳的名單、題庫檔案只在這台電腦的瀏覽器裡讀取，不會上傳。</li>' +
   '<li>這裡的「匿名」是指畫面上不顯示誰投了什麼，<b>不是加密的正式投票</b>：知道代碼的人都能加入，換瀏覽器或無痕視窗也能再投一次。請勿用於選舉、計分考試或需要防作弊的場合。</li>' +
   '<li>手機搶答的先後以老師電腦收到的時間為準，網路快慢會影響結果；要求公平時請用「現場按鍵」。</li>' +
   '<li>教室沒有網路時，投票可以改用「✋ 舉手計票」手動加票，其他工具都能離線使用。</li>' +
@@ -144,27 +149,45 @@ function rosterCard(){
     '<div class="row"><select class="tx" id="rosterSel" style="flex:1 1 9rem;width:auto" aria-label="選擇班級">' + S.rosters.map((x) => '<option value="' + x.id + '"' + (x.id === r.id ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select>' +
     '<button class="btn alt" data-act="roster">✏ 編輯</button></div>' +
     '<p class="small" style="margin:.5rem 0 .3rem">點名字＝今天缺席（不會被抽到、不分組），再點一次恢復。</p>' +
-    '<div class="chips">' + r.list.map((n, i) => '<button class="nm' + (ab.has(n) ? ' out' : '') + '" data-abs="' + i + '">' + esc(n) + '</button>').join('') + '</div>' +
+    '<div class="chips">' + r.list.map((n, i) => '<button class="nm' + (ab.has(n) ? ' out' : '') + '" data-abs="' + i + '">' + esc(disp(n, r)) + '</button>').join('') + '</div>' +
     (ab.size ? '<div class="row" style="margin-top:.45rem"><button class="btn alt" data-act="allIn">全部出席</button></div>' : '') + '</div>';
 }
-function parseNames(t){
-  const seen = {}, out = [];
-  String(t || '').split(/[\n,，、\t;；]+/).map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean).forEach((n) => {
-    n = cut(n, 20); let k = n, i = 2; while (seen[k]) k = n + '(' + (i++) + ')'; seen[k] = 1; out.push(k);
-  });
-  return out;
-}
+const rosterLines = (list, ids) => list.map((n) => (ids && ids[n] ? ids[n] + '\t' : '') + n).join('\n');
 function openRoster(id){
-  const r = S.rosters.find((x) => x.id === id) || roster();
+  const r = S.rosters.find((x) => x.id === id) || roster(), sh = r.show || 'name';
   openModal('<h2>📋 班級名單</h2><div class="row"><select class="tx" id="rsPick" style="flex:1 1 10rem;width:auto">' + S.rosters.map((x) => '<option value="' + x.id + '"' + (x.id === r.id ? ' selected' : '') + '>' + esc(x.name) + '（' + x.list.length + ' 人）</option>').join('') + '</select>' +
     '<button class="btn alt" data-act="rsNew">＋ 新增班級</button></div>' +
     '<label class="small" style="display:block;margin-top:.7rem">班級名稱<input class="tx" id="rsName" maxlength="30" value="' + esc(r.name) + '"></label>' +
-    '<label class="small" style="display:block;margin-top:.6rem">名單（一行一位；也可以直接從 Excel 複製一整欄貼上，逗號、頓號分隔也可以）<textarea class="tx" id="rsList" rows="10">' + esc(r.list.join('\n')) + '</textarea></label>' +
+    '<div class="row" style="margin-top:.6rem"><button class="btn y" data-act="rsImport">📂 上傳 CSV／Excel</button><button class="btn alt" data-act="rsCsv">⬇ 下載 CSV</button><button class="btn alt" data-act="rsXlsx">⬇ 下載 Excel</button><input type="file" id="rsFile" accept=".csv,.tsv,.txt,.xlsx,.xlsm" hidden></div>' +
+    '<p class="small" style="margin:.3rem 0 0">上傳的檔案要有「學號」「姓名」欄（沒有標題列也會自動判斷），舊版 .xls 請先另存成 .xlsx 或 CSV。下載的檔案也可以當範本，改完再上傳。</p>' +
+    '<label class="small" style="display:block;margin-top:.6rem">名單（一行一位：「學號 姓名」或只有姓名；可從 Excel 直接複製兩欄貼上）<textarea class="tx" id="rsList" rows="9">' + esc(rosterLines(r.list, r.ids)) + '</textarea></label>' +
     '<div class="row" style="margin-top:.5rem"><span class="small">沒有名單？用座號：</span>' + numBox('rsSeat', r.list.length || 30, 1, 200) + '<button class="btn alt" data-act="rsSeat">產生 1～N 號</button></div>' +
+    '<label class="small" style="display:block;margin-top:.6rem">投影時顯示<select class="tx" id="rsShow">' + [['name', '姓名'], ['both', '學號＋姓名'], ['id', '只顯示學號（不在投影露出姓名）']].map((o) => '<option value="' + o[0] + '"' + (sh === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select></label>' +
     '<p class="small">名字重複時會自動加上 (2)、(3)。名單只存在這台電腦。</p>' +
     '<div class="stack"><button class="btn" data-act="rsSave" data-id="' + r.id + '">💾 儲存並使用這一班</button>' +
     (S.rosters.length > 1 ? '<button class="btn red" data-act="rsDel" data-id="' + r.id + '">🗑 刪除這一班</button>' : '') +
     '<button class="btn alt" data-act="close">取消</button></div>');
+}
+async function importRoster(f){
+  try {
+    const x = await TCHIO.readFile(f), res = x.rows ? TCHIO.rowsToRoster(x.rows) : TCHIO.parseRosterText(x.text);
+    if (!res.list.length) { toast('檔案裡找不到名單'); return; }
+    $('rsList').value = rosterLines(res.list, res.ids);
+    const nm = $('rsName'); if (/^新班級|^範例班/.test(nm.value)) nm.value = cut(f.name.replace(/\.[^.]+$/, ''), 30);
+    const k = Object.keys(res.ids).length;
+    toast('讀到 ' + res.list.length + ' 人' + (k ? '，學號 ' + k + ' 筆' : '（沒有學號欄）') + '，確認後按「儲存」');
+  } catch (e) { toast(e.message || '讀檔失敗'); }
+}
+// 下載名單：以表單目前內容為準，附上出席、分組、抽籤順序
+function rosterExport(kind){
+  const id = document.querySelector('[data-act=rsSave]').dataset.id, r = S.rosters.find((x) => x.id === id) || roster();
+  const f = TCHIO.parseRosterText($('rsList').value); if (!f.list.length) { toast('名單是空的'); return; }
+  const L = S.grp.last && S.grp.last.rid === r.id ? S.grp.last : null, gi = {}, ab = new Set(r.absent || []), dr = drawnOf(r);
+  if (L) L.groups.forEach((g, i) => g.forEach((n, j) => { gi[n] = '第 ' + (i + 1) + ' 組' + (L.leader && j === 0 ? '（組長）' : ''); }));
+  const head = ['學號', '姓名', '今天出席'].concat(L ? ['組別'] : [], dr.length ? ['抽籤順序'] : []);
+  const rows = [head].concat(f.list.map((n) => [f.ids[n] || '', n, ab.has(n) ? '缺席' : '出席'].concat(L ? [gi[n] || ''] : [], dr.length ? [dr.indexOf(n) + 1 || ''] : [])));
+  const fn = ($('rsName').value.trim() || r.name) + '名單';
+  if (kind === 'csv') download(fn + '.csv', TCHIO.csvText(rows), 'text/csv'); else downloadBlob(fn + '.xlsx', TCHIO.xlsxBlob(rows, '名單', [14, 12, 10, 14, 10]));
 }
 
 /* ---------- 🎯 抽籤點名 ---------- */
@@ -180,7 +203,7 @@ function renderDraw(){
     '<button class="btn alt" data-act="drawReset">↺ 重新開始</button></div><div class="dust" id="dust"></div></div>' +
     '<aside class="side">' + rosterCard() +
     '<div class="card"><h3>✅ 已抽出<span class="r">' + drawn.length + ' 人</span></h3>' +
-    (drawn.length ? '<div class="chips">' + drawn.map((n, i) => '<button class="nm hit" data-back="' + i + '" title="放回籤筒">' + (i + 1) + '. ' + esc(n) + '</button>').join('') + '</div><p class="small" style="margin:.4rem 0 0">點名字可以放回籤筒。</p>' : '<p class="small">還沒抽。</p>') +
+    (drawn.length ? '<div class="chips">' + drawn.map((n, i) => '<button class="nm hit" data-back="' + i + '" title="放回籤筒">' + (i + 1) + '. ' + esc(disp(n)) + '</button>').join('') + '</div><p class="small" style="margin:.4rem 0 0">點名字可以放回籤筒。</p>' : '<p class="small">還沒抽。</p>') +
     '</div></aside></section>';
   drawInfo();
 }
@@ -193,7 +216,7 @@ function doDraw(){
   const picks = shuffle(pool).slice(0, k);
   const el = $('drawRes'); rolling = true;
   el.className = 'drawRes rolling' + (k > 2 ? ' many' : '');
-  const show = (arr) => { el.innerHTML = arr.map((n) => '<span class="nmB">' + esc(n) + '</span>').join(''); };
+  const show = (arr) => { el.innerHTML = arr.map((n) => '<span class="nmB">' + esc(disp(n)) + '</span>').join(''); };
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   let t = 0, delay = 45; const total = reduce ? 0 : 1700;
   (function step(){
@@ -226,7 +249,7 @@ function showGroups(anim){
   info.textContent = r.name + '・' + L.groups.reduce((a, x) => a + x.length, 0) + ' 人分成 ' + L.groups.length + ' 組';
   box.classList.toggle('dense', L.groups.length > 8 || L.groups.some((x) => x.length > 7));
   box.innerHTML = L.groups.map((m, i) => '<div class="grp" style="--gc:' + COLORS[i % COLORS.length] + (anim ? ';animation-delay:' + (i * .07) + 's' : ';animation:none') + '"><h4>第 ' + (i + 1) + ' 組 <small>' + m.length + ' 人</small></h4><ul>' +
-    m.map((n, j) => '<li' + (L.leader && j === 0 ? ' class="lead"' : '') + '>' + esc(n) + '</li>').join('') + '</ul></div>').join('');
+    m.map((n, j) => '<li' + (L.leader && j === 0 ? ' class="lead"' : '') + '>' + esc(disp(n)) + '</li>').join('') + '</ul></div>').join('');
 }
 function doGroup(){
   const pres = shuffle(present()); if (pres.length < 2) { toast('出席人數不夠分組'); return; }
@@ -236,7 +259,7 @@ function doGroup(){
   g.last = {rid:roster().id, groups:shuffle(groups).sort((a, b) => b.length - a.length), leader:g.leader};
   lsPut('grp', g); showGroups(true); SND.win(); dust(30);
 }
-function groupText(){ const L = S.grp.last; if (!L) return ''; return roster().name + ' 分組結果\n' + L.groups.map((m, i) => '第 ' + (i + 1) + ' 組：' + m.map((n, j) => n + (L.leader && j === 0 ? '（組長）' : '')).join('、')).join('\n'); }
+function groupText(){ const L = S.grp.last; if (!L) return ''; return roster().name + ' 分組結果\n' + L.groups.map((m, i) => '第 ' + (i + 1) + ' 組：' + m.map((n, j) => disp(n) + (L.leader && j === 0 ? '（組長）' : '')).join('、')).join('\n'); }
 
 /* ---------- ⏱ 計時器 ---------- */
 const T = {total:S.tset.total * 1000, remain:S.tset.total * 1000, running:false, endAt:0, over:false, lastBeep:-1,
@@ -437,7 +460,7 @@ function pollChats(p){
     });
     if (cur) out.push('O' + p.pid + '.' + k + ':' + cur);
   }
-  return out;
+  return out.slice(1).concat(out.slice(0, 1)); // 先送選項文字（手機上按鈕要用），題目大螢幕上看得到
 }
 function queueChats(a){ NET.q.push.apply(NET.q, a); pump(); }
 function pump(){
@@ -452,7 +475,7 @@ function onPeerName(id, name){
     const p = S.vote.cur; if (!p || p.state !== 'open' || a[1] !== p.pid) return;
     let ch = String(a[2] || '').toUpperCase().split('').filter((c, i, arr) => LETTERS.indexOf(c) >= 0 && LETTERS.indexOf(c) < p.n && arr.indexOf(c) === i).sort().join('');
     if (p.type !== 'm') ch = ch.slice(0, 1);
-    if (!ch) delete p.votes[id]; else p.votes[id] = ch;
+    if (!ch) { delete p.votes[id]; if (p.who) delete p.who[id]; } else { p.votes[id] = ch; const stu = cleanStu(a[3]); if (stu) (p.who = p.who || {})[id] = stu; }
     saveVoteSoon(); if (S.tab === 'vote') votePaint();
   } else if (a[0] === 'B' && a[1] === B.rid) bzPhone(id, a.slice(2).join('|'));
 }
@@ -498,7 +521,8 @@ function tally(p){
   const manSum = man.reduce((a, b) => a + b, 0);
   return {c, voters:voters + (p.type === 'm' ? Math.max(0, ...man) : manSum)};
 }
-function teacherVoteName(p){ return 'T|v|' + p.pid + '|' + p.n + '|' + p.type + '|' + (p.state === 'open' ? 'o' : 'c') + '|' + (p.state === 'open' ? '' : p.ans || ''); }
+const cleanStu = (v) => cut(String(v || '').toUpperCase().replace(/[^A-Z0-9-]/g, ''), 12);
+function teacherVoteName(p){ return 'T|v|' + p.pid + '|' + p.n + '|' + (p.named ? p.type.toUpperCase() : p.type) + '|' + (p.state === 'open' ? 'o' : 'c') + '|' + (p.state === 'open' ? '' : p.ans || ''); }
 function renderVote(){
   const v = S.vote, p = v.cur, ty = v.type;
   $('app').innerHTML = '<section class="tool"><div class="stage" id="vStage"></div>' +
@@ -506,8 +530,10 @@ function renderVote(){
     '<div class="card"><h3>✏ 出題</h3><span class="seg" role="group" aria-label="題型" style="flex-wrap:wrap">' + Object.keys(VOTE_TYPES).map((k) => '<button data-vtype="' + k + '" aria-pressed="' + (ty === k) + '">' + VOTE_TYPES[k].n + '</button>').join('') + '</span>' +
     '<label class="small" style="display:block;margin-top:.6rem">題目<input class="tx" id="vQ" maxlength="120" value="' + esc(v.q) + '" placeholder="' + (ty === 'u' ? '剛剛這段聽懂了嗎？' : ty === 'r' ? '今天的課程你給幾分？' : ty === 't' ? '例：毛利率越高代表越賺錢？' : '例：你最想先學哪個 AI 工具？') + '"></label>' +
     (ty === 's' || ty === 'm' ? '<label class="small" style="display:block;margin-top:.5rem">選項（一行一個，2～8 個）<textarea class="tx" id="vOpts" rows="4" placeholder="ChatGPT&#10;Gemini&#10;Claude">' + esc(v.opts) + '</textarea></label>' : '<p class="small">選項固定：' + VOTE_TYPES[ty].labels.join('／') + '</p>') +
+    '<label class="ck" style="margin-top:.4rem"><input type="checkbox" id="vNamed"' + (v.named ? ' checked' : '') + '> 🏆 記名計分（學生要輸入學號，可下載成績）</label>' +
     '<div class="row" style="margin-top:.6rem"><button class="btn y" data-act="vStart">▶ 開始投票</button></div>' +
     '<p class="small" style="margin:.5rem 0 0">題目會同步顯示在學生手機上（太長會截短，完整題目看大螢幕）。</p></div>' +
+    bankCard() + scoreCard() +
     '<div class="card"><h3>🗂 本機紀錄<span class="r">' + S.polls.length + ' 題</span></h3>' + (S.polls.length ? '<ul class="hist">' + S.polls.slice().reverse().slice(0, 30).map((h) => '<li><b>' + esc(h.q || '（未填題目）') + '</b><span class="small">' + esc(h.at) + '・' + h.voters + ' 人作答・' + h.labels.map((l, i) => l + ' ' + h.c[i]).join('、') + '</span></li>').join('') + '</ul><div class="row" style="margin-top:.5rem"><button class="btn alt" data-act="vCsv">⬇ 匯出 CSV</button><button class="btn alt" data-act="vClearHist">清除紀錄</button></div>' : '<p class="small">每題結束（按「下一題」）會存一筆。</p>') + '</div>' +
     '</aside></section>';
   lastStageKey = ''; votePaint(); drawQR($('qrSide'), 170);
@@ -550,21 +576,91 @@ function votePaint(){
   });
   const avg = $('vAvg'); if (avg) avg.textContent = p.type === 'r' && total ? '平均 ' + (c.reduce((s, x, i) => s + x * (i + 1), 0) / total).toFixed(2) + ' 分' : '';
 }
-function vStart(){
-  const v = S.vote; v.q = ($('vQ') ? $('vQ').value : v.q).trim(); if ($('vOpts')) v.opts = $('vOpts').value;
+function vStart(item){
+  const v = S.vote;
+  if (item && item.q) { v.type = item.type; v.q = item.q; v.opts = item.opts.join('\n'); }
+  else { v.q = ($('vQ') ? $('vQ').value : v.q).trim(); if ($('vOpts')) v.opts = $('vOpts').value; if ($('vNamed')) v.named = $('vNamed').checked; }
   let opts = [];
   if (v.type === 's' || v.type === 'm') { opts = v.opts.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 8); if (opts.length < 2) { toast('至少要 2 個選項'); return; } }
   if (v.cur) archivePoll();
   const n = v.type === 's' || v.type === 'm' ? opts.length : VOTE_TYPES[v.type].labels.length;
-  v.cur = {pid:pid4(), type:v.type, q:v.q, opts, n, state:'open', show:true, ans:'', votes:{}, manual:Array(n).fill(0), manualOn:!NET.want, at:new Date().toLocaleString('zh-TW', {hour12:false})};
+  v.cur = {pid:pid4(), type:v.type, q:v.q, opts, n, state:'open', show:true, ans:'', votes:{}, manual:Array(n).fill(0), manualOn:!NET.want, named:!!v.named, who:{}, at:new Date().toLocaleString('zh-TW', {hour12:false})};
+  if (item && item.ans) v.cur.ans = item.ans;
   lsPut('vote', v);
   if (NET.want) { NET.q = []; setTeacher(teacherVoteName(v.cur)); queueChats(pollChats(v.cur)); }
   SND.go(); lastStageKey = ''; renderVote();
 }
 function archivePoll(){
   const p = S.vote.cur; if (!p) return; const {c, voters} = tally(p);
-  if (voters || c.some(Boolean)) { S.polls.push({q:p.q, type:VOTE_TYPES[p.type].n, labels:labelsOf(p), c, voters, ans:p.ans ? p.ans.split('').map((L) => labelsOf(p)[LETTERS.indexOf(L)]).join('、') : '', at:p.at}); if (S.polls.length > 100) S.polls.shift(); lsPut('polls', S.polls); }
+  if (voters || c.some(Boolean)) { S.polls.push(pollRecord(p)); if (S.polls.length > 100) S.polls.shift(); lsPut('polls', S.polls); }
 }
+function pollRecord(p){
+  const {c, voters} = tally(p), answers = {};
+  if (p.named) Object.keys(p.votes).forEach((id) => { const s = p.who && p.who[id]; if (s) answers[s] = p.votes[id]; });
+  return {q:p.q, type:VOTE_TYPES[p.type].n, t:p.type, labels:labelsOf(p), c, voters, ans:p.ans ? p.ans.split('').map((L) => labelsOf(p)[LETTERS.indexOf(L)]).join('、') : '', ansL:p.ans || '', named:!!p.named, answers, at:p.at};
+}
+// 成績：記名計分＋有設答案的題目（含目前這題），每位學生一列；姓名用目前班級名單的學號對應
+function scoreRows(){
+  const qs = S.polls.filter((h) => h.named && h.ansL); const cur = S.vote.cur;
+  if (cur && cur.named && cur.ans) qs.push(pollRecord(cur));
+  if (!qs.length) return null;
+  const r = roster(), nameOf = {}; Object.keys(r.ids || {}).forEach((n) => { nameOf[cleanStu(r.ids[n])] = n; });
+  const stus = Object.keys(nameOf); qs.forEach((h) => Object.keys(h.answers || {}).forEach((x) => { if (stus.indexOf(x) < 0) stus.push(x); }));
+  const show = (h, a) => h.t === 't' ? a.replace('A', 'O').replace('B', 'X') : a;
+  const body = stus.map((x) => {
+    let ok = 0, done = 0;
+    const cells = qs.map((h) => { const a = (h.answers || {})[x]; if (!a) return '未作答'; done++; if (a === h.ansL) { ok++; return '✔ ' + show(h, a); } return '✘ ' + show(h, a); });
+    return {x, row:[x, nameOf[x] || '（名單沒有這個學號）'].concat(cells, [ok, done, qs.length, Math.round(ok / qs.length * 100)]), ok};
+  }).sort((a, b) => b.ok - a.ok || (a.x > b.x ? 1 : -1)).map((o) => o.row);
+  const rows = [['學號', '姓名'].concat(qs.map((_, i) => '第 ' + (i + 1) + ' 題'), ['答對題數', '作答題數', '總題數', '得分（百分制）'])].concat(body);
+  rows.push([], ['題號', '題目', '正確答案', '答對人數', '作答人數', '答對率']);
+  qs.forEach((h, i) => { const a = Object.values(h.answers || {}), k = a.filter((v) => v === h.ansL).length; rows.push(['第 ' + (i + 1) + ' 題', h.q, show(h, h.ansL) + '（' + h.ans + '）', k, a.length, a.length ? Math.round(k / a.length * 100) + '%' : '']); });
+  return {rows, nQ:qs.length, nS:body.length};
+}
+function scoreCard(){
+  const sr = scoreRows();
+  return '<div class="card"><h3>🏆 成績<span class="r">' + (sr ? sr.nQ + ' 題・' + sr.nS + ' 人' : '') + '</span></h3>' +
+    (sr ? '<p class="small" style="margin:0 0 .4rem">只計算「記名計分」且有設定答案的題目；姓名用目前班級名單的學號對應。</p><div class="row"><button class="btn alt" data-act="scCsv">⬇ 成績 CSV</button><button class="btn alt" data-act="scXlsx">⬇ 成績 Excel</button></div>'
+      : '<p class="small" style="margin:0">勾「🏆 記名計分」並設定答案（從題庫出題會自動帶答案），就能下載成績。</p>') + '</div>';
+}
+function scoreExport(kind){
+  const sr = scoreRows(); if (!sr) { toast('還沒有可計分的題目'); return; }
+  const fn = roster().name + '成績-' + new Date().toLocaleDateString('sv');
+  if (kind === 'csv') download(fn + '.csv', TCHIO.csvText(sr.rows), 'text/csv'); else downloadBlob(fn + '.xlsx', TCHIO.xlsxBlob(sr.rows, '成績', [14, 12].concat(Array(sr.nQ).fill(10), [10, 10, 10, 14])));
+}
+/* 題庫 */
+const ansShow = (q) => q.type === 't' ? (q.ans === 'A' ? 'O' : 'X') : q.ans;
+function bankCard(){
+  const b = S.bank, it = b.items;
+  if (!it.length) return '<div class="card"><h3>📚 題庫</h3><p class="small" style="margin:0 0 .4rem">上傳 Word（.docx）、Excel、CSV 或文字檔，事先出好的題目一題一題出，答案自動帶入。</p><div class="row"><button class="btn alt" data-act="bankOpen">📂 匯入題庫</button><button class="btn alt" data-act="bankTpl">⬇ Excel 範本</button></div></div>';
+  const used = new Set(b.used || []), next = it.findIndex((_, i) => !used.has(i));
+  return '<div class="card"><h3>📚 題庫<span class="r">' + esc(cut(b.name, 14)) + '・已出 ' + used.size + '/' + it.length + '</span></h3>' +
+    (next >= 0 ? '<button class="btn y" data-act="bankNext" style="width:100%">▶ 出下一題（第 ' + (next + 1) + ' 題）</button>' : '<p class="small">全部出完了。</p>') +
+    '<ol class="hist" style="margin-top:.4rem;padding-left:1.4em;list-style:decimal">' + it.map((q, i) => '<li' + (used.has(i) ? ' style="opacity:.55"' : '') + '><b>' + esc(cut(q.q, 40)) + '</b><span class="small">' + VOTE_TYPES[q.type].n + (q.ans ? '・答案 ' + esc(ansShow(q)) : '・未設答案') + (used.has(i) ? '・已出' : '') + '</span> <button class="ib" data-bank="' + i + '" style="min-height:2rem">▶ 出這題</button></li>').join('') + '</ol>' +
+    '<div class="row" style="margin-top:.5rem"><button class="btn alt" data-act="bankOpen">📂 換題庫</button><button class="btn alt" data-act="bankReset">↺ 重新開始</button><button class="btn alt" data-act="bankClear">🗑 清空</button></div></div>';
+}
+let bankDraft = null;
+function bankModal(){
+  const d = bankDraft;
+  openModal('<h2>📚 匯入題庫</h2><div class="row"><button class="btn y" data-act="bankPick">📂 選擇檔案（.docx／.xlsx／.csv／.txt）</button><button class="btn alt" data-act="bankTpl">⬇ Excel 範本</button><input type="file" id="bankFile" accept=".docx,.xlsx,.xlsm,.csv,.tsv,.txt,.md" hidden></div>' +
+    '<details style="margin-top:.5rem"><summary class="small" style="cursor:pointer">Word／文字檔怎麼寫？</summary><pre class="small" style="white-space:pre-wrap;background:var(--bg);padding:.5rem;border-radius:.5rem">1. 下列何者是大型語言模型？\n(A) Excel (B) ChatGPT (C) Word\n答案：B\n\n2. 哪些是 Google 的產品？\nA. Gemini\nB. Claude\nC. NotebookLM\n答案：AC（多個答案＝多選題）\n\n(X)3. 毛利率越高一定越賺錢。（沒有選項、答案 O/X＝是非題）</pre><p class="small">題號、選項可以用 Word 自動編號；答案寫在「答案：」後面，或像考卷寫在題號前面「(B)1.」。沒有答案也能出題，只是不計分。Excel／CSV：欄位「題目、選項A～選項H、答案」。</p></details>' +
+    '<label class="small" style="display:block;margin-top:.5rem">或直接貼上題目文字<textarea class="tx" id="bankText" rows="5"></textarea></label><button class="btn alt" data-act="bankParse" style="margin-top:.4rem">解析貼上的文字</button>' +
+    (d ? '<div class="card" style="margin-top:.7rem"><h3>讀到 ' + d.items.length + ' 題' + (d.skipped.length ? '<span class="r">略過 ' + d.skipped.length + ' 題</span>' : '') + '</h3><ol class="hist" style="padding-left:1.4em;list-style:decimal">' +
+      d.items.map((q) => '<li><b>' + esc(q.q) + '</b><span class="small">' + VOTE_TYPES[q.type].n + '・' + (q.type === 't' ? '是／否' : q.opts.map((o, i) => LETTERS[i] + '. ' + esc(o)).join('　')) + '・' + (q.ans ? '答案 ' + esc(ansShow(q)) : '未設答案') + '</span></li>').join('') + '</ol>' +
+      (d.skipped.length ? '<p class="small">略過（沒有選項也沒有是非答案）：' + d.skipped.map((x) => esc(cut(x, 20))).join('、') + '</p>' : '') + '</div>' : '') +
+    '<div class="stack">' + (d && d.items.length ? '<button class="btn" data-act="bankUse">✔ 使用這 ' + d.items.length + ' 題</button>' : '') + '<button class="btn alt" data-act="close">取消</button></div>', true);
+}
+async function bankFromFile(f){
+  try { const x = await TCHIO.readFile(f), res = x.rows ? TCHIO.rowsToQuiz(x.rows) : TCHIO.parseQuizText(x.text); bankDraft = Object.assign(res, {name:f.name.replace(/\.[^.]+$/, '')}); if (!res.items.length) toast('檔案裡找不到題目，請參考格式說明'); bankModal(); }
+  catch (e) { toast(e.message || '讀檔失敗'); }
+}
+function bankUse(){ if (!bankDraft || !bankDraft.items.length) return; S.bank = {name:bankDraft.name || '貼上的題目', items:bankDraft.items.slice(0, 200), used:[]}; lsPut('bank', S.bank); bankDraft = null; closeModal(); renderVote(); toast('題庫已載入，共 ' + S.bank.items.length + ' 題'); }
+function bankStart(i){
+  const q = S.bank.items[i]; if (!q) return;
+  if ($('vNamed')) S.vote.named = $('vNamed').checked;
+  vStart(q); if (S.bank.used.indexOf(i) < 0) S.bank.used.push(i); lsPut('bank', S.bank); renderVote();
+}
+const BANK_TPL = [['題目', '選項A', '選項B', '選項C', '選項D', '答案'], ['下列何者是大型語言模型？', 'Excel', 'ChatGPT', 'Word', '小畫家', 'B'], ['哪些是 Google 的產品？', 'Gemini', 'Claude', 'NotebookLM', '', 'AC'], ['毛利率越高一定越賺錢。', '', '', '', '', 'X']];
 function pollCsv(){
   const q = (s) => '"' + String(s).replace(/"/g, '""') + '"';
   const rows = [['時間', '題目', '題型', '選項', '票數', '作答人數', '正確答案'].map(q).join(',')];
@@ -573,7 +669,8 @@ function pollCsv(){
 }
 
 /* ---------- 學生手機頁 ---------- */
-const JS = {tid:'', name:'', qtext:{}, otext:{}, picks:'', nick:lsGet('nick') || ''};
+const JS = {tid:'', name:'', qtext:{}, otext:{}, picks:'', nick:lsGet('nick') || '', stuno:lsGet('stuno') || '', named:false};
+function voteSend(pid, L){ const n = 'S|' + pid + '|' + L + (JS.named ? '|' + JS.stuno : ''); if (n.length > 24) { toast('學號太長或選太多項，送不出去'); return false; } myName(n); return true; }
 function onChat(m){
   if (!m || !m.text) return;
   const tName = NET.peers.get(m.id);
@@ -599,16 +696,18 @@ function renderJoin(){
   else body = '<div class="jWait"><span class="big">🙂</span>已加入，等老師出題</div>';
   root.innerHTML = '<div class="join"><div class="jHead"><div class="brand"><img src="icons/icon-192.png" alt=""><span>課堂小幫手</span></div><div class="r"><span class="dot ' + (on ? 'on' : 'bad') + '"></span>' + NET.code + '</div></div><div class="jMain">' + body + '</div>' + joinFoot() + '</div>';
 }
-function joinFoot(){ return '<div class="jFoot">匿名作答：老師畫面不會顯示誰選了什麼。<br><a href="./">講師課堂小幫手</a>・<a href="manual.html">說明</a>・<button class="ib" style="min-height:0;padding:0;background:none;color:var(--r);text-decoration:underline" data-act="warn">⚠ 使用警語</button></div>'; }
+function joinFoot(){ return '<div class="jFoot">' + (JS.named ? '記名計分：老師會看到你的學號與答案。' : '匿名作答：老師畫面不會顯示誰選了什麼。') + '<br><a href="./">講師課堂小幫手</a>・<a href="manual.html">說明</a>・<button class="ib" style="min-height:0;padding:0;background:none;color:var(--r);text-decoration:underline" data-act="warn">⚠ 使用警語</button></div>'; }
 function joinVote(ts){
-  const pid = ts[2], n = clamp(+ts[3] || 2, 2, 8), type = VOTE_TYPES[ts[4]] ? ts[4] : 's', open = ts[5] === 'o', ans = ts[6] || '';
+  const tl = String(ts[4] || ''), named = /[A-Z]/.test(tl), pid = ts[2], n = clamp(+ts[3] || 2, 2, 8), type = VOTE_TYPES[tl.toLowerCase()] ? tl.toLowerCase() : 's', open = ts[5] === 'o', ans = ts[6] || '';
+  JS.named = named;
+  if (named && !JS.stuno) return '<div class="jQ">🏆 這題記名計分<br>請先輸入學號</div><form class="codeIn" id="stunoForm"><input class="tx" id="stunoIn" maxlength="12" autocomplete="off" inputmode="text" aria-label="學號"><button class="btn y">好了</button></form><p class="jFoot">老師會看到你的學號和答案，用來計算成績。</p>';
   const mine = JS.name.split('|'), voted = mine[0] === 'S' && mine[1] === pid ? mine[2] : '';
   if (JS.pid !== pid) { JS.pid = pid; JS.picks = voted; }
   const T2 = VOTE_TYPES[type]; let labels = T2.labels ? T2.labels.slice() : null;
   if (!labels) { const parts = (JS.otext[pid] || []); labels = []; let ok = true; for (let i = 0; i < parts.length; i++) { if (parts[i] == null) { ok = false; break; } } if (ok && parts.length) labels = parts.join(' ｜ ').split(' ｜ '); }
   const marks = T2.marks || LETTERS.split('');
   const q = JS.qtext[pid];
-  let h = '<div class="jQ">' + (q ? esc(q) : '請看大螢幕的題目') + '</div>';
+  let h = (named ? '<p class="jFoot" style="margin:0">🏆 記名計分・學號 ' + esc(JS.stuno) + ' <button class="ib" data-act="stunoEdit" style="min-height:1.8rem;font-size:.75rem">改學號</button></p>' : '') + '<div class="jQ">' + (q ? esc(q) : '請看大螢幕的題目') + '</div>';
   if (!open && ans) {
     const ok = voted && voted === ans.split('').sort().join('');
     h += '<div class="result ' + (ok ? 'ok' : 'no') + '">' + (!voted ? '這題你沒有作答' : ok ? '🎉 答對了！' : '再接再厲！') + '</div><p class="jWait" style="font-size:1.1rem">答案：' + ans.split('').map((L) => esc(marks[LETTERS.indexOf(L)] + ' ' + (labels[LETTERS.indexOf(L)] || ''))).join('、') + '</p>';
@@ -652,7 +751,7 @@ function openSettings(){
   $('restoreFile').addEventListener('change', restoreFile);
 }
 function saveFold(){ const o = []; document.querySelectorAll('.set-sec').forEach((d) => { if (d.open) o.push(d.dataset.sec); }); lsPut('fold', o); }
-const BACKUP_KEYS = ['pref', 'rosters', 'cur', 'drawn', 'drawOpt', 'grp', 'timer', 'buzz', 'vote', 'polls'];
+const BACKUP_KEYS = ['pref', 'rosters', 'cur', 'drawn', 'drawOpt', 'grp', 'timer', 'buzz', 'vote', 'polls', 'bank'];
 function backup(){ const o = {app:'teacher-classroom-helper', v:1, at:new Date().toISOString(), data:{}}; BACKUP_KEYS.forEach((k) => { const v = lsGet(k); if (v != null) o.data[k] = v; }); download('課堂小幫手備份-' + new Date().toLocaleDateString('sv') + '.json', JSON.stringify(o, null, 1), 'application/json'); }
 function restoreFile(e){
   const f = e.target.files[0]; if (!f) return;
@@ -686,6 +785,7 @@ document.addEventListener('click', (e) => {
   if (d.vtype) { const v = S.vote; if ($('vQ')) v.q = $('vQ').value; if ($('vOpts')) v.opts = $('vOpts').value; v.type = d.vtype; lsPut('vote', v); renderVote(); return; }
   if (d.man != null) { const p = S.vote.cur; if (!p) return; p.manual[+d.man] = Math.max(0, (p.manual[+d.man] || 0) + (+d.d)); saveVoteSoon(); votePaint(); return; }
   if (d.vote) { joinPick(d.vote); return; }
+  if (d.bank != null) { bankStart(+d.bank); return; }
   if (d.themeSet) { S.pref.theme = d.themeSet; savePref(); openSettings(); return; }
   if (d.fsSet) { S.pref.fs = d.fsSet; savePref(); openSettings(); return; }
   if (d.ansPick) { t.setAttribute('aria-pressed', t.getAttribute('aria-pressed') !== 'true'); return; }
@@ -696,8 +796,9 @@ document.addEventListener('click', (e) => {
     drawReset: () => { S.drawn[roster().id] = []; lsPut('drawn', S.drawn); renderDraw(); toast('籤筒已重置'); },
     allIn: () => { roster().absent = []; saveRosters(); renderTool(); },
     rsNew: () => { const id = 'r' + Date.now().toString(36); S.rosters.push({id, name:'新班級 ' + S.rosters.length, list:seatList(30), absent:[]}); saveRosters(); openRoster(id); },
+    rsImport: () => $('rsFile').click(), rsCsv: () => rosterExport('csv'), rsXlsx: () => rosterExport('xlsx'),
     rsSeat: () => { $('rsList').value = seatList(clamp(+$('rsSeat').value || 30, 1, 200)).join('\n'); },
-    rsSave: () => { const r = S.rosters.find((x) => x.id === d.id); if (!r) return; const list = parseNames($('rsList').value); if (!list.length) { toast('名單是空的'); return; } r.name = cut($('rsName').value.trim(), 30) || '未命名班級'; r.list = list; r.absent = (r.absent || []).filter((n) => list.indexOf(n) >= 0); S.cur = r.id; saveRosters(); closeModal(); if (!JOIN) renderTool(); toast('已儲存：' + r.name + '（' + list.length + ' 人）'); },
+    rsSave: () => { const r = S.rosters.find((x) => x.id === d.id); if (!r) return; const pr = TCHIO.parseRosterText($('rsList').value), list = pr.list; if (!list.length) { toast('名單是空的'); return; } r.name = cut($('rsName').value.trim(), 30) || '未命名班級'; r.list = list; r.ids = pr.ids; r.show = $('rsShow').value; r.absent = (r.absent || []).filter((n) => list.indexOf(n) >= 0); S.cur = r.id; saveRosters(); closeModal(); if (!JOIN) renderTool(); toast('已儲存：' + r.name + '（' + list.length + ' 人）'); },
     rsDel: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '再按一次確定刪除'; return; } S.rosters = S.rosters.filter((x) => x.id !== d.id); delete S.drawn[d.id]; lsPut('drawn', S.drawn); S.cur = S.rosters[0].id; saveRosters(); closeModal(); renderTool(); },
     tGo: tToggle, tReset, tAdd: () => tAdd(+d.s), tLap: () => { if (!T.sw.running) return; T.sw.laps.push(swNow()); renderTimer(); },
     tCustom: () => { const s = (+$('tMin').value || 0) * 60 + (+$('tSec').value || 0); if (s < 1) { toast('請輸入時間'); return; } tSet(s); },
@@ -717,7 +818,15 @@ document.addEventListener('click', (e) => {
     vAnsClear: () => { const p = S.vote.cur; p.ans = ''; lsPut('vote', S.vote); setTeacher(teacherVoteName(p)); closeModal(); votePaint(); },
     vCsv: () => download('課堂投票紀錄-' + new Date().toLocaleDateString('sv') + '.csv', pollCsv(), 'text/csv'),
     vClearHist: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定清除？'; return; } S.polls = []; lsPut('polls', S.polls); renderVote(); },
-    vSend: () => { if (JS.picks) myName('S|' + JS.pid + '|' + JS.picks); renderJoin(); },
+    vSend: () => { if (JS.picks) voteSend(JS.pid, JS.picks); renderJoin(); },
+    scCsv: () => scoreExport('csv'), scXlsx: () => scoreExport('xlsx'),
+    bankOpen: () => { bankDraft = null; bankModal(); }, bankPick: () => $('bankFile').click(), bankUse,
+    bankParse: () => { const r = TCHIO.parseQuizText($('bankText').value); bankDraft = Object.assign(r, {name:'貼上的題目'}); if (!r.items.length) toast('找不到題目，請參考格式說明'); const keep = $('bankText').value; bankModal(); $('bankText').value = keep; },
+    bankTpl: () => downloadBlob('題庫範本.xlsx', TCHIO.xlsxBlob(BANK_TPL, '題庫', [36, 14, 14, 14, 14, 8])),
+    bankNext: () => { const used = new Set(S.bank.used), i = S.bank.items.findIndex((_, k) => !used.has(k)); if (i >= 0) bankStart(i); },
+    bankReset: () => { S.bank.used = []; lsPut('bank', S.bank); renderVote(); },
+    bankClear: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定清空題庫？'; return; } S.bank = {name:'', items:[], used:[]}; lsPut('bank', S.bank); renderVote(); },
+    stunoEdit: () => { JS.stuno = ''; lsDel('stuno'); renderJoin(); },
     buzz: () => { const ts = teacherState(); if (!ts || ts[1] !== 'b' || ts[3] !== 'o') return; myName('B|' + ts[2] + '|' + JS.nick); if (navigator.vibrate) navigator.vibrate(60); renderJoin(); },
     nickEdit: () => { JS.nick = ''; lsDel('nick'); renderJoin(); },
     sndTest: () => SND.win(),
@@ -730,10 +839,13 @@ document.addEventListener('click', (e) => {
 function joinPick(L){
   const ts = teacherState(); if (!ts || ts[1] !== 'v' || ts[5] !== 'o') return;
   if (ts[4] === 'm') { JS.picks = JS.picks.indexOf(L) >= 0 ? JS.picks.replace(L, '') : (JS.picks + L).split('').sort().join(''); renderJoin(); return; }
-  JS.picks = L; myName('S|' + ts[2] + '|' + L); if (navigator.vibrate) navigator.vibrate(30); renderJoin();
+  JS.picks = L; if (!voteSend(ts[2], L)) return; if (navigator.vibrate) navigator.vibrate(30); renderJoin();
 }
 document.addEventListener('change', (e) => {
   const t = e.target, id = t.id;
+  if (id === 'rsFile') { if (t.files[0]) importRoster(t.files[0]); t.value = ''; return; }
+  if (id === 'rsPick') { openRoster(t.value); return; }
+  if (id === 'bankFile') { if (t.files[0]) bankFromFile(t.files[0]); t.value = ''; return; }
   if (id === 'rosterSel') { S.cur = t.value; saveRosters(); renderTool(); }
   else if (id === 'drawCount') { S.drawOpt.count = clamp(+t.value || 1, 1, 10); t.value = S.drawOpt.count; lsPut('drawOpt', S.drawOpt); }
   else if (id === 'noRepeat') { S.drawOpt.noRepeat = t.checked; lsPut('drawOpt', S.drawOpt); drawInfo(); }
@@ -745,11 +857,13 @@ document.addEventListener('change', (e) => {
   else if (t.dataset.tname != null) { S.buzz.teams[+t.dataset.tname].n = cut(t.value.trim(), 12) || '第 ' + (+t.dataset.tname + 1) + ' 組'; lsPut('buzz', S.buzz); bzPaint(); }
   else if (id === 'sndOn') { S.pref.sound = t.checked; savePref(); }
   else if (id === 'sndVol') { S.pref.vol = clamp(+t.value, .1, 1); savePref(); SND.pop(); }
+  else if (id === 'vNamed') { S.vote.named = t.checked; lsPut('vote', S.vote); }
   else if (id === 'vQ' || id === 'vOpts') { S.vote.q = $('vQ').value; if ($('vOpts')) S.vote.opts = $('vOpts').value; lsPut('vote', S.vote); }
 });
 document.addEventListener('submit', (e) => {
   e.preventDefault();
   if (e.target.id === 'codeForm') { const c = $('codeIn').value.toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!/^[A-Z0-9]{6}$/.test(c)) { toast('代碼是 6 個英文或數字'); return; } history.replaceState(null, '', '?join=' + c + (QS.get('presence') ? '&presence=' + encodeURIComponent(QS.get('presence')) : '')); joinStart(c); }
+  if (e.target.id === 'stunoForm') { const n = $('stunoIn').value.toUpperCase().replace(/[^A-Z0-9-]/g, ''); if (!n) { toast('請輸入學號（英文、數字）'); return; } JS.stuno = n.slice(0, 12); lsSet('stuno', JS.stuno); renderJoin(); }
   if (e.target.id === 'nickForm') { const n = $('nickIn').value.replace(/[|<>\u0000-\u001f]/g, '').trim(); if (!n) { toast('請輸入名字或組別'); return; } JS.nick = cut(n, 12); lsSet('nick', JS.nick); renderJoin(); }
 });
 document.addEventListener('keydown', (e) => {
@@ -800,5 +914,5 @@ if (JOIN) {
   if (S.vote.cur && S.vote.cur.state === 'open') NET.state = teacherVoteName(S.vote.cur);
   if (!lsGet('warnSeen')) { lsSet('warnSeen', '1'); showWarn(); }
 }
-window._tch = {S, T, B, NET, JS, setTab, doDraw, doGroup, tSet, bzStart, bzHit, tally, pollChats, parseNames, renderTool};
+window._tch = {S, T, B, NET, JS, setTab, doDraw, doGroup, tSet, bzStart, bzHit, tally, pollChats, renderTool, importRoster, rosterExport, scoreRows, bankUse, bankFromFile, bankStart, scoreExport, openRoster};
 })();
