@@ -30,6 +30,44 @@ const pid4 = () => String(1000 + rnd(9000));
 const QS = new URLSearchParams(location.search);
 const ONLINE = 'https://m255525.github.io/teacher-classroom-helper/';
 const PRESENCE = QS.get('presence') || 'wss://startup-island-presence.content-workflow.workers.dev/ws';
+const LOBBY_URL = PRESENCE.replace(/^ws/, 'http').replace(/\/ws(\?.*)?$/, '/lobby');
+const LOB = {rooms:[], at:0, err:false, t:0};
+function fetchLobby(){
+  return fetch(LOBBY_URL, {cache:'no-store'}).then((r) => r.json()).then((d) => { LOB.rooms = Array.isArray(d.rooms) ? d.rooms : []; LOB.at = Date.now(); LOB.err = false; paintLobby(); })
+    .catch(() => { LOB.err = true; paintLobby(); });
+}
+function startLobby(){ fetchLobby(); clearInterval(LOB.t); LOB.t = setInterval(() => { if (!document.hidden) fetchLobby(); }, 20000); }
+function lobbyListHtml(){
+  if (!LOB.at) return '<p class="small">讀取中⋯</p>';
+  if (!LOB.rooms.length) return '<p class="small">' + (LOB.err ? '連不上教室大廳，請檢查網路。' : '目前沒有公開的教室。可以改用老師給的 6 碼代碼加入。') + '</p>';
+  return '<div class="opts">' + LOB.rooms.map((x, i) => '<button class="opt" style="--bc:' + COLORS[i % COLORS.length] + '" data-room="' + esc(x.code) + '" data-rpw="' + (x.pw ? 1 : 0) + '" data-rname="' + esc(x.name) + '"><span class="lb">🏫</span><span>' + esc(x.name) + '<br><small style="font-weight:500;opacity:.8">' + (x.pw ? '🔒 要密碼' : '🔓 不用密碼') + '・' + x.n + ' 人在教室</small></span></button>').join('') + '</div>';
+}
+function paintLobby(){
+  const c = $('lobbyChip'); if (c) { c.textContent = '🏫 ' + (LOB.at ? LOB.rooms.length + ' 間教室' : '教室大廳'); c.title = LOB.rooms.map((x) => x.name).join('、') || '目前沒有公開的教室'; }
+  const l = $('lobbyList'); if (l) l.innerHTML = lobbyListHtml();
+  const n = $('lobbyCnt'); if (n) n.textContent = LOB.at ? '目前 ' + LOB.rooms.length + ' 間教室' : '';
+}
+function openLobby(){
+  openModal('<h2>🏫 教室大廳</h2><p class="small"><span id="lobbyCnt"></span>（老師幫教室命名並勾「公開在大廳」才會出現在這裡）。點教室、輸入密碼就能進入。</p><div id="lobbyList"></div>' +
+    '<div class="stack"><button class="btn alt" data-act="lobbyRefresh">🔄 重新整理</button><button class="btn alt" data-act="lobbyCode">⌨ 用 6 碼代碼加入</button><button class="btn" data-act="close">關閉</button></div>', true);
+  paintLobby(); fetchLobby();
+}
+// 選了大廳裡的教室：要密碼就先問，再帶著代碼（＋密碼）進入學生作答頁
+function lobbyPick(code, needPw, name){
+  if (needPw) {
+    openModal('<h2>🔒 ' + esc(name) + '</h2><p>請輸入老師公布的教室密碼。</p><form class="codeIn" id="lobbyPwForm" data-code="' + esc(code) + '"><input class="tx" id="lobbyPwIn" maxlength="8" autocomplete="off" autocapitalize="characters" aria-label="教室密碼" style="text-transform:uppercase"><button class="btn y">進入教室</button></form><div class="stack"><button class="btn alt" data-act="close">取消</button></div>');
+    setTimeout(() => { const el = $('lobbyPwIn'); if (el) el.focus(); }, 50);
+    return;
+  }
+  goRoom(code, '');
+}
+function goRoom(code, pw){
+  const extra = QS.get('presence') ? '&presence=' + encodeURIComponent(QS.get('presence')) : '';
+  if (pw) lsSet('spw.' + code, pw);
+  if (JOIN) { closeModal(); history.replaceState(null, '', '?join=' + code + extra); JS.closed = false; joinStart(code); return; }
+  const url = '?join=' + code + (pw ? '&pw=' + encodeURIComponent(pw) : '') + extra;
+  if (NET.want) window.open(url, '_blank'); else location.href = url; // 老師這頁還開著教室就另開分頁，免得把教室關掉
+}
 const COLORS = ['var(--y)', 'var(--p)', 'var(--b)', 'var(--o)', 'var(--g)', 'var(--v)', 'var(--r)'];
 const LETTERS = 'ABCDEFGH';
 const VOTE_TYPES = {
@@ -133,6 +171,7 @@ function renderShell(){
   $('root').innerHTML = '<header class="top"><div class="brand"><img src="icons/icon-192.png" alt=""><span>講師課堂小幫手</span></div>' +
     '<nav class="nav" role="tablist" aria-label="工具">' + TABS.map((t) => '<button role="tab" data-tab="' + t.id + '" aria-selected="' + (S.tab === t.id) + '">' + t.ic + ' ' + t.n + '</button>').join('') + '</nav>' +
     '<div class="tright"><button class="chipLive" id="tChip" data-tab="timer" hidden></button><button class="chipLive net" id="nChip" data-tab="vote" hidden></button>' +
+    '<button class="ib" id="lobbyChip" data-act="lobby" title="目前上課中的教室">🏫 教室大廳</button><a class="ib" href="?join" title="學生用：選教室、輸入密碼進入">🎓 學生登入</a>' +
     '<button class="ib" data-act="roster" title="班級名單">📋 名單</button><button class="ib" data-act="fs" title="全螢幕（F 鍵）">⛶ 全螢幕</button>' +
     '<a class="ib" href="manual.html">📖 操作手冊</a><button class="ib" data-act="settings" title="常用設定" aria-label="常用設定">⚙</button></div></header>' +
     '<main id="app"></main>' +
@@ -446,7 +485,7 @@ function netStop(closeRoom){
   if (closeRoom && NET.role === 'T' && ws0 && ws0.readyState === 1) try { ws0.send('{"t":"close"}'); } catch (e) {}
   NET.want = false; clearTimeout(NET.rt); const ws = NET.ws; NET.ws = null; NET.status = 'off'; NET.peers.clear(); NET.who.clear();
   if (ws) setTimeout(() => { try { ws.close(); } catch (e) {} }, closeRoom ? 400 : 0);
-  if (closeRoom && code) { ['tkey.', 'pw.', 'vcur.'].forEach((k) => lsDel(k + code)); }
+  if (closeRoom && code) { ['tkey.', 'pw.', 'vcur.', 'rinfo.'].forEach((k) => lsDel(k + code)); setTimeout(fetchLobby, 1500); }
   ssDel('room'); updChips(); if (isVT() || S.tab === 'buzz') renderTool();
 }
 function netConnect(){
@@ -460,7 +499,7 @@ function netConnect(){
     NET.status = 'on'; NET.retry = 0;
     ws.send(JSON.stringify({t:'hello', id:NET.myId, name:NET.role === 'T' ? NET.state : (JS.name || 'W'), gx:0, gy:0}));
     clearInterval(NET.ping); NET.ping = setInterval(() => { if (NET.ws && NET.ws.readyState === 1) NET.ws.send('{"t":"ping"}'); }, 25000);
-    if (NET.role === 'T') { const p = S.vote.cur; if (p && p.state === 'open') { NET.q = []; queueChats(pollChats(p)); } pump(); }
+    if (NET.role === 'T') { sendRoomInfo(); const p = S.vote.cur; if (p && p.state === 'open') { NET.q = []; queueChats(pollChats(p)); } pump(); }
     netPaint();
   };
   ws.onmessage = (ev) => { if (NET.ws !== ws) return; let m; try { m = JSON.parse(ev.data); } catch (e) { return; } onNet(m); };
@@ -483,6 +522,11 @@ function onNet(m){
     NET.peers.clear(); (m.peers || []).forEach((p) => NET.peers.set(p.id, String(p.name || '')));
     if (NET.role === 'T') NET.peers.forEach((n, id) => onPeerName(id, n));
     else { NET.peers.forEach((n, id) => { if (/^T\|/.test(n)) JS.tid = id; }); (m.chat || []).forEach(onChat); }
+  } else if (m.t === 'room' && NET.role === 'T') {
+    const want = roomInfo();
+    if (want.name && !m.name) toast('教室名稱含有不適合的字詞，沒有公開到大廳');
+    else if (NET.nameAsk) toast(m.pub ? '已公開在教室大廳：' + m.name : '已儲存名稱（沒有公開在大廳）');
+    NET.nameAsk = false; fetchLobby();
   } else if (m.t === 'join' && m.peer) { NET.peers.set(m.peer.id, String(m.peer.name || '')); if (NET.role === 'T') onPeerName(m.peer.id, m.peer.name); else if (/^T\|/.test(m.peer.name)) JS.tid = m.peer.id; }
   else if (m.t === 'look') { NET.peers.set(m.id, String(m.name || '')); if (NET.role === 'T') onPeerName(m.id, m.name); else if (/^T\|/.test(m.name)) JS.tid = m.id; }
   else if (m.t === 'leave') NET.peers.delete(m.id);
@@ -522,6 +566,8 @@ function onPeerName(id, name){
     saveVoteSoon(); if (isVT()) votePaint();
   } else if (a[0] === 'B' && a[1] === B.rid) bzPhone(id, who);
 }
+const roomInfo = () => Object.assign({name:'', pub:true}, lsJson('rinfo.' + NET.code, {}));
+function sendRoomInfo(){ const ri = roomInfo(); if (NET.role === 'T' && ri.name) send({t:'room', name:ri.name, pub:ri.pub}); }
 function netCard(){
   if (!NET.want) return '<div class="card joinCard"><h3>📱 手機連線</h3><p class="small" style="text-align:left">開放後會產生 6 碼代碼和 QR code，學生用手機掃描就能投票、搶答，不用下載 App、不用登入。</p><button class="btn y" data-act="netOn">📱 開放手機連線</button></div>';
   const url = joinUrl(NET.code), local = !/github\.io$/.test(location.hostname);
@@ -530,6 +576,8 @@ function netCard(){
     (local ? '<p class="small" style="text-align:left">目前不是線上版網址，QR code 指向線上版：' + esc(ONLINE) + '</p>' : '') +
     '<div class="row c" style="margin-top:.5rem"><button class="btn alt" data-act="qrBig">🔍 放大 QR</button><button class="btn alt" data-act="copyJoin">🔗 複製連結</button><button class="btn alt" data-act="netNew">換代碼</button><button class="btn red" data-act="netOff">🚪 關閉教室</button></div>' +
     '<div class="row c" style="margin-top:.5rem"><input class="tx" id="netPw" maxlength="8" placeholder="教室密碼（選填）" value="' + esc(NET.pw) + '" style="width:9.5rem;text-transform:uppercase" aria-label="教室密碼"><button class="btn alt" data-act="netPw">🔒 ' + (NET.pw ? '改密碼' : '設密碼') + '</button></div>' +
+    '<div class="row c" style="margin-top:.5rem"><input class="tx" id="netName" maxlength="20" placeholder="教室名稱（例：' + esc(cut(roster().name, 10)) + '）" value="' + esc(roomInfo().name) + '" style="flex:1 1 9rem;width:auto" aria-label="教室名稱"></div>' +
+    '<div class="row c"><label class="ck"><input type="checkbox" id="netPub"' + (roomInfo().pub ? ' checked' : '') + '> 公開在首頁「教室大廳」</label><button class="btn alt" data-act="netName">🏷 儲存名稱</button></div>' +
     '<div class="small" id="netJoined" style="margin-top:.5rem">' + joinedSummary() + '</div>' +
     '<p class="small" style="text-align:left;margin:.3rem 0 0">學生進來要先輸入學號或姓名。只有知道代碼和密碼的人能加入；改密碼後已加入的學生要重新輸入。學生之間看不到彼此的作答。</p></div>';
 }
@@ -620,10 +668,10 @@ let lastStageKey = '';
 function votePaint(){
   const st = $('vStage'); if (!st) return; const p = tabPoll();
   if (!p) {
-    const k = 'idle' + S.tab + NET.want + NET.code + NET.pw + S.bank.items.length + S.qs.id;
+    const k = 'idle' + roomInfo().name + S.tab + NET.want + NET.code + NET.pw + S.bank.items.length + S.qs.id;
     if (lastStageKey !== k || !st.firstChild) {
       lastStageKey = k;
-      st.innerHTML = NET.want ? '<div class="qrBig" style="flex:1 1 auto;justify-content:center"><div class="voteQ">' + (S.tab === 'quiz' ? '📝 ' + esc(S.qs.name || S.bank.name || '測驗') + '・掃描加入' : '📱 拿出手機，掃描加入') + '</div><div class="qr" id="qrStage"></div><div class="joinCode" style="font-size:clamp(2.4rem,6vw,4.5rem)">' + NET.code + '</div>' + (NET.pw ? '<div class="drawHint">🔒 密碼 <b style="color:var(--y)">' + esc(NET.pw) + '</b></div>' : '') + '<div class="small">或打開 ' + esc(ONLINE.replace('https://', '')) + ' 輸入代碼</div><div class="drawHint" id="vIdleCnt"></div></div>'
+      st.innerHTML = NET.want ? '<div class="qrBig" style="flex:1 1 auto;justify-content:center">' + (roomInfo().name ? '<div class="drawHint">🏫 ' + esc(roomInfo().name) + '</div>' : '') + '<div class="voteQ">' + (S.tab === 'quiz' ? '📝 ' + esc(S.qs.name || S.bank.name || '測驗') + '・掃描加入' : '📱 拿出手機，掃描加入') + '</div><div class="qr" id="qrStage"></div><div class="joinCode" style="font-size:clamp(2.4rem,6vw,4.5rem)">' + NET.code + '</div>' + (NET.pw ? '<div class="drawHint">🔒 密碼 <b style="color:var(--y)">' + esc(NET.pw) + '</b></div>' : '') + '<div class="small">或打開 ' + esc(ONLINE.replace('https://', '')) + ' 輸入代碼</div><div class="drawHint" id="vIdleCnt"></div></div>'
         : S.tab === 'quiz' ? '<div class="drawBox"><span class="drawHint">📝 測驗<br><small style="font-size:.7em">先「開放手機連線」讓學生用學號或姓名加入，再從右邊題庫出題</small></span></div>'
         : '<div class="drawBox"><span class="drawHint">右邊出一題，按「開始投票」<br><small style="font-size:.7em">先「開放手機連線」學生就能用手機作答；沒有網路也可以用「✋ 舉手計票」</small></span></div>';
       drawQR($('qrStage'), 260);
@@ -857,8 +905,10 @@ function myName(n){ JS.name = n; lsSet('my.' + NET.code, n); send({t:'look', nam
 function renderJoin(){
   const root = $('root'); if (!root) return;
   if (!NET.want) {
-    root.innerHTML = '<div class="join"><div class="jHead"><div class="brand"><img src="icons/icon-192.png" alt=""><span>課堂小幫手</span></div></div><div class="jMain"><div class="jQ">輸入老師給的 6 碼代碼</div>' +
+    root.innerHTML = '<div class="join"><div class="jHead"><div class="brand"><img src="icons/icon-192.png" alt=""><span>課堂小幫手</span></div></div><div class="jMain"><div class="jQ">🏫 選擇教室</div><div class="small" id="lobbyCnt" style="text-align:center"></div><div id="lobbyList"></div>' +
+      '<div class="jQ" style="font-size:1.15rem;margin-top:.6rem">或輸入老師給的 6 碼代碼</div>' +
       '<form class="codeIn" id="codeForm"><input class="tx" id="codeIn" maxlength="6" autocomplete="off" autocapitalize="characters" inputmode="text" aria-label="代碼"><button class="btn y">加入</button></form></div>' + joinFoot() + '</div>';
+    paintLobby(); startLobby();
     return;
   }
   if (JS.closed) {
@@ -976,6 +1026,7 @@ document.addEventListener('click', (e) => {
   if (d.man != null) { const p = S.vote.cur; if (!p) return; p.manual[+d.man] = Math.max(0, (p.manual[+d.man] || 0) + (+d.d)); saveVoteSoon(); votePaint(); return; }
   if (d.vote) { joinPick(d.vote); return; }
   if (d.bank != null) { bankStart(+d.bank); return; }
+  if (d.room) { lobbyPick(d.room, d.rpw === '1', d.rname || ''); return; }
   if (d.scq) { scoreExport(d.kind, d.scq); return; }
   if (d.amode) { if (d.amode === 'manual') autoStop(); S.auto.mode = d.amode; lsPut('auto', S.auto); renderVote(); return; }
   if (d.themeSet) { S.pref.theme = d.themeSet; savePref(); openSettings(); return; }
@@ -1003,6 +1054,8 @@ document.addEventListener('click', (e) => {
     joinNew: () => { JS.closed = false; netStop(); history.replaceState(null, '', location.pathname + '?join'); renderJoin(); },
     qrBig: () => { openModal('<div class="qrBig"><h2>📱 掃描加入</h2><div class="qr" id="qrModal"></div><div class="joinCode" style="font-size:3.4rem">' + NET.code + '</div><div class="joinUrl">' + esc(joinUrl(NET.code)) + '</div><button class="btn" data-act="close">關閉</button></div>', true); drawQR($('qrModal'), Math.min(420, innerWidth - 90, innerHeight - 280)); },
     joinedList: openJoined, joinedCsv,
+    lobby: openLobby, lobbyRefresh: fetchLobby, lobbyCode: () => { if (JOIN) { closeModal(); return; } location.href = '?join'; },
+    netName: () => { const name = cut(($('netName').value || '').replace(/[|<>\u0000-\u001f]/g, '').trim(), 20), pub = $('netPub').checked; lsPut('rinfo.' + NET.code, {name, pub}); NET.nameAsk = true; if (name) sendRoomInfo(); else { send({t:'room', name:'', pub:false}); } lastStageKey = ''; votePaint(); },
     copyJoin: () => copyText(joinUrl(NET.code)),
     vStart, vClose: () => { autoStop('已切回手動出題'); const p = S.vote.cur; p.state = 'closed'; saveVote(); setTeacher(teacherVoteName(p)); SND.pop(); votePaint(); },
     vReopen: () => { autoStop('已切回手動出題'); const p = S.vote.cur; p.state = 'open'; saveVote(); setTeacher(teacherVoteName(p)); votePaint(); },
@@ -1064,6 +1117,7 @@ document.addEventListener('change', (e) => {
 });
 document.addEventListener('submit', (e) => {
   e.preventDefault();
+  if (e.target.id === 'lobbyPwForm') { const v = $('lobbyPwIn').value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8); if (!v) { toast('請輸入密碼'); return; } goRoom(e.target.dataset.code, v); return; }
   if (e.target.id === 'codeForm') { const c = $('codeIn').value.toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!/^[A-Z0-9]{6}$/.test(c)) { toast('代碼是 6 個英文或數字'); return; } history.replaceState(null, '', '?join=' + c + (QS.get('presence') ? '&presence=' + encodeURIComponent(QS.get('presence')) : '')); joinStart(c); }
   if (e.target.id === 'pwForm') { const v = $('pwIn').value.toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!v) { toast('請輸入密碼'); return; } NET.pw = v; lsSet('spw.' + NET.code, v); JS.pwNeed = false; renderJoin(); netReconnect(); return; }
   if (e.target.id === 'whoForm') { const n = cleanWho($('whoIn').value); if (!n) { toast('請輸入學號或姓名'); return; } JS.who = n; JS.whoEdit = false; lsSet('who', n); myName(withWho(JS.name)); renderJoin(); }
@@ -1110,7 +1164,7 @@ if (JOIN) {
   const c = String(QS.get('join') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (/^[A-Z0-9]{6}$/.test(c)) joinStart(c); else renderJoin();
 } else {
-  renderShell(); renderTool();
+  renderShell(); renderTool(); startLobby();
   setInterval(tTick, 200);
   const room = ssGet('room');
   S.vote.cur = ssJson('vcur', null) || (room ? lsJson('vcur.' + room, null) : null);
@@ -1122,5 +1176,5 @@ if (JOIN) {
   if (isVT()) renderTool();
   if (!lsGet('warnSeen')) { lsSet('warnSeen', '1'); showWarn(); }
 }
-window._tch = {S, T, B, NET, JS, setTab, doDraw, doGroup, tSet, bzStart, bzHit, tally, pollChats, renderTool, AUTO, autoStart, newQuiz, openBoard, importRoster, rosterExport, scoreRows, bankUse, bankFromFile, bankStart, scoreExport, openRoster};
+window._tch = {S, T, B, NET, JS, setTab, doDraw, doGroup, tSet, bzStart, bzHit, tally, pollChats, renderTool, LOB, fetchLobby, AUTO, autoStart, newQuiz, openBoard, importRoster, rosterExport, scoreRows, bankUse, bankFromFile, bankStart, scoreExport, openRoster};
 })();
