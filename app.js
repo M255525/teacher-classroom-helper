@@ -173,7 +173,7 @@ function renderShell(){
     '<nav class="nav" role="tablist" aria-label="工具">' + TABS.map((t) => '<button role="tab" data-tab="' + t.id + '" aria-selected="' + (S.tab === t.id) + '">' + t.ic + ' ' + t.n + '</button>').join('') + '</nav>' +
     '<div class="tright"><button class="chipLive" id="tChip" data-tab="timer" hidden></button><button class="chipLive net" id="nChip" data-tab="vote" hidden></button>' +
     '<button class="ib" id="lobbyChip" data-act="lobby" title="目前上課中的教室">🏫 教室大廳</button><a class="ib" href="?join" title="學生用：選教室、輸入密碼進入">🎓 學生登入</a>' +
-    '<button class="ib" data-act="roster" title="班級名單">📋 名單</button><button class="ib" data-act="fs" title="全螢幕（F 鍵）">⛶ 全螢幕</button>' +
+    '<button class="ib" id="admChip" data-act="admLock" title="管理密碼已解鎖，按一下立刻上鎖" hidden>🔓 已解鎖・上鎖</button><button class="ib" data-act="roster" title="班級名單">📋 名單</button><button class="ib" data-act="fs" title="全螢幕（F 鍵）">⛶ 全螢幕</button>' +
     '<a class="ib" href="manual.html">📖 操作手冊</a><button class="ib" data-act="settings" title="常用設定" aria-label="常用設定">⚙</button></div></header>' +
     '<main id="app"></main>' +
     '<footer class="foot">講師課堂小幫手｜👤 創作者 Mark Tsai（蔡豐全）<a href="mailto:tsaimark@gmail.com">tsaimark@gmail.com</a>・<a href="manual.html">操作手冊</a>・<a href="manual.html#creator">關於創作者</a>・<button data-act="warn">⚠ 使用警語</button>' +
@@ -466,7 +466,7 @@ function netStart(code){
 }
 // 同一個瀏覽器的其他分頁：問「這個代碼有沒有人在用」
 const BC = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('tch-room') : null;
-if (BC) BC.onmessage = (e) => { const d = e.data || {}; if (d.q && !JOIN && NET.want && NET.role === 'T' && NET.code === d.q) BC.postMessage({busy:d.q}); };
+if (BC) BC.onmessage = (e) => { const d = e.data || {}; if (d.q && !JOIN && NET.want && NET.role === 'T' && NET.code === d.q) BC.postMessage({busy:d.q}); if (d.ask && !JOIN) BC.postMessage({st:d.ask, s:myLive()}); };
 function codeBusy(code){
   return new Promise((ok) => {
     if (!BC || !code) { ok(false); return; }
@@ -1110,6 +1110,7 @@ function openSettings(){
     sec('snd', '🔊 音效', pf.sound ? '開・音量 ' + Math.round(pf.vol * 100) + '%' : '關',
       '<label class="ck"><input type="checkbox" id="sndOn"' + (pf.sound ? ' checked' : '') + '> 開啟音效</label><label class="small" style="display:block;margin-top:.3rem">音量<input type="range" id="sndVol" min="0.1" max="1" step="0.1" value="' + pf.vol + '" style="width:100%"></label><button class="btn alt" data-act="sndTest">試聽</button>') +
     sec('roster', '📋 班級名單', S.rosters.length + ' 班・目前 ' + roster().name, '<p class="small">名單只存在這台電腦。</p><button class="btn" data-act="roster">✏ 編輯名單</button>') +
+    admSection() +
     sec('data', '💾 資料備份', '', '<p class="small">名單、分組結果、投票紀錄與設定都只存在這台電腦的瀏覽器。換電腦前先下載備份檔，再到新電腦還原。</p><div class="stack"><button class="btn" data-act="backup">⬇ 下載備份檔</button><button class="btn alt" data-act="restore">⬆ 從備份檔還原</button><button class="btn red" data-act="wipe">🗑 清除全部資料</button></div><input type="file" id="restoreFile" accept=".json,application/json" hidden>') +
     sec('about', 'ℹ 關於本工具', '', '<p>👤 創作者 Mark Tsai（蔡豐全）<br><a href="mailto:tsaimark@gmail.com">tsaimark@gmail.com</a></p><div class="stack"><a class="btn alt" href="manual.html">📖 操作手冊</a><a class="btn alt" href="manual.html#creator">👤 關於創作者</a><button class="btn alt" data-act="warn">⚠ 使用警語</button>' +
       (standalone ? '' : '<button class="btn alt" data-act="install">📲 加入主畫面</button>') + '</div><p class="small" style="margin-top:.5rem">訪客數 <img src="https://visitor-badge.laobi.icu/badge?page_id=m255525.teacherclassroomhelper" alt="訪客次數" height="20" loading="lazy" style="vertical-align:middle"></p>') +
@@ -1135,6 +1136,125 @@ function install(){
   openModal('<h2>📲 加入主畫面</h2><ul><li><b>電腦 Chrome／Edge</b>：網址列右側的「安裝」圖示，或選單 →「安裝應用程式」。</li><li><b>iPhone／iPad</b>：用 Safari 開啟 → 分享 →「加入主畫面」。</li><li><b>Android</b>：Chrome 選單 →「加到主畫面」。</li></ul><p class="small">加入後可以離線開啟（投票與手機搶答仍需要網路）。</p><div class="stack"><button class="btn" data-act="close">知道了</button></div>');
 }
 function toggleFs(){ if (document.fullscreenElement) document.exitFullscreen(); else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => toast('這個瀏覽器不能全螢幕，請按 F11')); }
+
+/* ---------- 🔐 管理密碼＋上課中保護 ----------
+   A. 上課中不能刪：這個分頁或其他分頁（BroadcastChannel 問）還有學生連線、投票／測驗作答中、自動出題中。
+   B. 管理密碼（一台電腦一組，存 tch.adm = {salt, hash, list}）：刪除班級、清除紀錄、清空題庫、清除全部資料、
+      還原備份、關閉教室／換代碼每次都要輸入；名單保護（list）開著時，看名單、下載名單／點名／成績、下載備份
+      要輸入一次，之後 10 分鐘內不用再輸入（重新整理或按「上鎖」就鎖回去）。只存加鹽雜湊。 */
+const ADM = {until:0, fail:0, lockUntil:0, cb:null, always:false};
+const admInfo = () => lsJson('adm', null);
+const admHas = () => { const a = admInfo(); return !!(a && a.hash); };
+const admList = () => { const a = admInfo(); return !!(a && a.hash && a.list !== false); };
+const admOpen = () => ADM.until > Date.now();
+const pinOk = (v) => /^\d{4,6}$/.test(v);
+function hexOf(buf){ return Array.from(new Uint8Array(buf)).map((b) => ('0' + b.toString(16)).slice(-2)).join(''); }
+function pinHash(salt, pin){
+  const txt = 'tch|' + salt + '|' + pin;
+  if (window.crypto && crypto.subtle && window.TextEncoder) return crypto.subtle.digest('SHA-256', new TextEncoder().encode(txt)).then(hexOf);
+  let h = 2166136261; for (let i = 0; i < txt.length; i++) { h ^= txt.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }   // file:// 沒有 crypto.subtle
+  return Promise.resolve('f' + h.toString(16));
+}
+function admCheck(pin){
+  const a = admInfo(); if (!a || !a.hash) return Promise.resolve(true);
+  if (ADM.lockUntil > Date.now()) return Promise.reject('密碼錯太多次，請 ' + Math.ceil((ADM.lockUntil - Date.now()) / 1000) + ' 秒後再試');
+  return pinHash(a.salt, String(pin || '')).then((h) => {
+    if (h === a.hash) { ADM.fail = 0; return true; }
+    if (++ADM.fail >= 5) { ADM.fail = 0; ADM.lockUntil = Date.now() + 60000; }
+    return false;
+  });
+}
+function updAdm(){ const c = $('admChip'); if (c) c.hidden = !(admHas() && admOpen()); }
+function needAdmin(title, fn, always){
+  if (!admHas() || (!always && admOpen())) { fn(); return; }
+  ADM.cb = fn; ADM.always = !!always;
+  openModal('<h2>🔐 ' + esc(title) + '</h2><p class="small">這台電腦設了管理密碼。' + (always ? '這個動作每次都要輸入。' : '輸入後 10 分鐘內不用再輸入（重新整理或按頂列「🔓 上鎖」就鎖回去）。') + '</p>' +
+    '<input class="tx" id="admPin" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="4～6 位數字" aria-label="管理密碼">' +
+    '<div class="stack"><button class="btn" data-act="admOk">確定</button><button class="btn alt" data-act="close">取消</button></div>');
+  setTimeout(() => { const i = $('admPin'); if (i) { i.focus(); i.addEventListener('keydown', (e) => { if (e.key === 'Enter') admOk(); }); } }, 50);
+}
+function admOk(){
+  const i = $('admPin'), pin = i ? i.value : '';
+  if (!pin) { toast('請輸入管理密碼'); return; }
+  admCheck(pin).then((ok) => {
+    if (!ok) { toast('管理密碼不對'); if (i) { i.value = ''; i.focus(); } return; }
+    if (!ADM.always) ADM.until = Date.now() + 600000;
+    const cb = ADM.cb; ADM.cb = null; closeModal(); updAdm(); if (cb) cb();
+  }, (msg) => toast(msg));
+}
+// 名單保護：開著才要密碼
+function guardView(title, fn){ if (admList()) needAdmin(title, fn, false); else fn(); }
+// 刪除類：沒設密碼＝原本的按兩次確認；有密碼＝輸入密碼就是確認
+function sureOr(t, label, title, fn){
+  if (admHas()) { needAdmin(title, fn, true); return; }
+  if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = label; return; }
+  fn();
+}
+// 這個分頁的上課狀態（也回報給其他分頁）
+function myLive(){
+  const why = [], p = S.vote.cur;
+  if (NET.want && NET.status === 'on' && studentCount()) why.push('還有 ' + studentCount() + ' 位學生連線');
+  if (p && p.state === 'open') why.push(p.quiz ? '測驗題目作答中' : '投票進行中');
+  if (AUTO.on) why.push('自動出題進行中');
+  return {open:!!NET.want, code:NET.code, why, roster:S.cur, bank:AUTO.on || !!(p && p.state === 'open' && p.quiz)};
+}
+function otherTabs(){
+  return new Promise((ok) => {
+    if (!BC) { ok([]); return; }
+    const n = randId(), got = [];
+    const h = (e) => { const d = e.data || {}; if (d.st === n && d.s) got.push(d.s); };
+    BC.addEventListener('message', h); BC.postMessage({ask:n});
+    setTimeout(() => { BC.removeEventListener('message', h); ok(got); }, 350);
+  });
+}
+// kind：wipe 清除全部／還原、hist 清除這班紀錄、bank 清空題庫、roster 刪除班級
+function blockedWhy(kind, rid){
+  return otherTabs().then((others) => {
+    const out = [], all = [{me:true, s:myLive()}].concat(others.map((x) => ({me:false, s:x})));
+    all.forEach((o) => {
+      const s = o.s, who = o.me ? '這個分頁' : '另一個分頁';
+      if (kind === 'wipe' && s.open) out.push(who + '的教室還開著（代碼 ' + s.code + '）' + (s.why.length ? '：' + s.why.join('、') : ''));
+      if (kind === 'hist' && s.roster === rid && s.why.length) out.push(who + '正在用這一班上課：' + s.why.join('、'));
+      if (kind === 'bank' && s.bank) out.push(who + '的測驗正在使用題庫');
+      if (kind === 'roster' && s.roster === rid) out.push(o.me ? '這一班是目前正在使用的班級，請先切換到別班再刪除' : '另一個分頁正在使用這一班');
+    });
+    return out;
+  });
+}
+function blockedModal(title, list, tip){
+  openModal('<h2>🔒 ' + esc(title) + '</h2><ul>' + list.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul><p class="small">' + (tip || '請等這堂課結束（投票、測驗截止，必要時按「🚪 關閉教室」讓學生離線）再做一次。') + '</p><div class="stack"><button class="btn" data-act="close">知道了</button></div>');
+}
+function admSection(){
+  if (!admHas()) return sec('adm', '🔐 管理密碼', '未設定',
+    '<p class="small">共用電腦建議設定。設了之後：<b>刪除班級、清除紀錄、清空題庫、清除全部資料、還原備份、關閉教室／換代碼</b>每次都要輸入密碼；開了「名單保護」，<b>看名單、下載名單／點名／成績、下載備份</b>也要輸入（10 分鐘內不用重複輸入）。抽籤、分組、計時、投票、出題都不用。</p>' +
+    '<div class="row"><input class="tx" id="admNew" type="password" inputmode="numeric" maxlength="6" placeholder="管理密碼 4～6 位數字" style="width:12rem" autocomplete="new-password"><input class="tx" id="admNew2" type="password" inputmode="numeric" maxlength="6" placeholder="再輸入一次" style="width:9rem" autocomplete="new-password"></div>' +
+    '<label class="ck" style="margin-top:.4rem"><input type="checkbox" id="admListCk" checked> 名單保護（學生學號、姓名、成績要輸入密碼才看得到、下載得到）</label>' +
+    '<p class="small">密碼只存在這台電腦（加密雜湊），<b>忘了無法找回</b>。</p><button class="btn" data-act="admSet">🔐 設定管理密碼</button>');
+  const a = admInfo();
+  return sec('adm', '🔐 管理密碼', '已設定' + (a.list !== false ? '・名單保護開' : '・名單保護關') + (admOpen() ? '・已解鎖' : ''),
+    (admOpen() ? '<div class="row"><button class="btn alt" data-act="admLock">🔒 立即上鎖</button><span class="small">已解鎖，10 分鐘內看名單、下載成績不用再輸入。</span></div>' : '') +
+    '<p class="small" style="margin-top:.4rem">修改設定要先輸入目前的密碼。新密碼兩欄留空＝不換密碼。</p>' +
+    '<div class="row"><input class="tx" id="admOld" type="password" inputmode="numeric" maxlength="6" placeholder="目前的密碼" style="width:9rem" autocomplete="off"><input class="tx" id="admNew" type="password" inputmode="numeric" maxlength="6" placeholder="新密碼（選填）" style="width:9rem" autocomplete="new-password"><input class="tx" id="admNew2" type="password" inputmode="numeric" maxlength="6" placeholder="再輸入一次" style="width:9rem" autocomplete="new-password"></div>' +
+    '<label class="ck" style="margin-top:.4rem"><input type="checkbox" id="admListCk"' + (a.list !== false ? ' checked' : '') + '> 名單保護</label>' +
+    '<div class="row" style="margin-top:.4rem"><button class="btn" data-act="admSave">💾 儲存變更</button><button class="btn alt" data-act="admRemove">取消管理密碼</button></div>' +
+    '<p class="small" style="margin-top:.6rem">忘記密碼？只能<button class="ib" data-act="admForgot" style="min-height:1.8rem">清除全部資料並重設</button>（名單、紀錄、題庫都會刪掉，所以別人沒辦法靠這個看到名單）。</p>');
+}
+function readNewPin(){
+  const a = (($('admNew') || {}).value || '').trim(), b = (($('admNew2') || {}).value || '').trim();
+  if (!a && !b) return {none:true};
+  if (!pinOk(a)) return {err:'管理密碼要 4～6 位數字'};
+  if (a !== b) return {err:'兩次輸入的密碼不一樣'};
+  return {pin:a};
+}
+function saveAdm(pin, list){
+  const salt = randId() + randId();
+  return pinHash(salt, pin).then((h) => { lsPut('adm', {salt, hash:h, list:!!list, at:new Date().toISOString()}); });
+}
+function wipeAll(keepAdm){
+  const keep = keepAdm ? {adm:1} : {};
+  Object.keys(localStorage).filter((k) => k.indexOf(P) === 0 && !keep[k.slice(P.length)]).forEach((k) => localStorage.removeItem(k));
+  location.reload();
+}
 
 /* ---------- 事件 ---------- */
 document.addEventListener('click', (e) => {
@@ -1162,7 +1282,7 @@ document.addEventListener('click', (e) => {
     renderVote(); return; }
   if (d.bedit != null) { bankEdit(+d.bedit); return; }
   if (d.room) { lobbyPick(d.room, d.rpw === '1', d.rname || ''); return; }
-  if (d.scq) { scoreExport(d.kind, d.scq); return; }
+  if (d.scq) { guardView('下載成績', () => scoreExport(d.kind, d.scq)); return; }
   if (d.amode) { if (d.amode === 'manual') autoStop(); S.auto.mode = d.amode; lsPut('auto', S.auto); renderVote(); return; }
   if (d.themeSet) { S.pref.theme = d.themeSet; savePref(); openSettings(); return; }
   if (d.fsSet) { S.pref.fs = d.fsSet; savePref(); openSettings(); return; }
@@ -1170,25 +1290,25 @@ document.addEventListener('click', (e) => {
   const act = d.act; if (!act) return;
   const A = {
     close: closeModal, warn: showWarn, settings: openSettings, install, fs: toggleFs,
-    roster: () => openRoster(), draw: doDraw, group: doGroup, grpCopy: () => S.grp.last ? copyText(groupText()) : toast('還沒分組'),
+    roster: () => guardView('看／編輯班級名單', () => openRoster()), draw: doDraw, group: doGroup, grpCopy: () => S.grp.last ? copyText(groupText()) : toast('還沒分組'),
     drawReset: () => { S.drawn[roster().id] = []; lsPut('drawn', S.drawn); renderDraw(); toast('籤筒已重置'); },
     allIn: () => { roster().absent = []; saveRosters(); renderTool(); },
     rsNew: () => { const id = 'r' + Date.now().toString(36); S.rosters.push({id, name:'新班級 ' + S.rosters.length, list:seatList(30), absent:[]}); saveRosters(); openRoster(id); },
     rsImport: () => $('rsFile').click(), rsCsv: () => rosterExport('csv'), rsXlsx: () => rosterExport('xlsx'),
     rsSeat: () => { $('rsList').value = seatList(clamp(+$('rsSeat').value || 30, 1, 200)).join('\n'); },
     rsSave: () => { const r = S.rosters.find((x) => x.id === d.id); if (!r) return; const pr = TCHIO.parseRosterText($('rsList').value), list = pr.list; if (!list.length) { toast('名單是空的'); return; } r.name = cut($('rsName').value.trim(), 30) || '未命名班級'; r.list = list; r.ids = pr.ids; r.show = $('rsShow').value; r.absent = (r.absent || []).filter((n) => list.indexOf(n) >= 0); S.cur = r.id; saveRosters(); closeModal(); if (!JOIN) renderTool(); toast('已儲存：' + r.name + '（' + list.length + ' 人）'); },
-    rsDel: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '再按一次確定刪除'; return; } S.rosters = S.rosters.filter((x) => x.id !== d.id); delete S.drawn[d.id]; lsPut('drawn', S.drawn); S.cur = S.rosters[0].id; saveRosters(); closeModal(); renderTool(); },
+    rsDel: () => { const r0 = S.rosters.find((x) => x.id === d.id); blockedWhy('roster', d.id).then((w) => { if (w.length) { blockedModal('不能刪除「' + (r0 ? r0.name : '') + '」', w, '在「班級名單」上方的下拉選單換成別班，或關掉另一個分頁，再回來刪除。'); return; } sureOr(t, '再按一次確定刪除', '刪除班級「' + (r0 ? r0.name : '') + '」', () => { S.rosters = S.rosters.filter((x) => x.id !== d.id); delete S.drawn[d.id]; lsPut('drawn', S.drawn); S.cur = S.rosters[0].id; saveRosters(); closeModal(); renderTool(); }); }); },
     tGo: tToggle, tReset, tAdd: () => tAdd(+d.s), tLap: () => { if (!T.sw.running) return; T.sw.laps.push(swNow()); renderTimer(); },
     tCustom: () => { const s = (+$('tMin').value || 0) * 60 + (+$('tSec').value || 0); if (s < 1) { toast('請輸入時間'); return; } tSet(s); },
     bzStart, bzReset, bzZero: () => { S.buzz.teams.forEach((x) => { x.s = 0; }); lsPut('buzz', S.buzz); bzPaint(); },
     netOn: netOpen,
     netPw: () => { const v = $('netPw').value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8); NET.pw = v; if (v) lsSet('pw.' + NET.code, v); else lsDel('pw.' + NET.code); netReconnect(); renderTool(); toast(v ? '密碼已設為 ' + v : '已取消密碼'); },
-    netOff: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定關閉？舊 QR code 會失效'; return; } autoStop(); netStop(true); toast('教室已關閉，舊的網址與 QR code 已失效'); },
-    netNew: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定換？舊代碼會失效、學生要重新掃'; return; } autoStop(); netStop(true); netStart(newCode()); renderTool(); },
+    netOff: () => sureOr(t, '確定關閉？舊 QR code 會失效', '關閉教室（學生會全部離線）', () => { autoStop(); netStop(true); toast('教室已關閉，舊的網址與 QR code 已失效'); }),
+    netNew: () => sureOr(t, '確定換？舊代碼會失效、學生要重新掃', '換代碼（舊教室會關閉）', () => { autoStop(); netStop(true); netStart(newCode()); renderTool(); }),
     joinRetry: () => { JS.closed = false; JS.kicked = false; renderJoin(); netReconnect(); },
     joinNew: () => { JS.closed = false; netStop(); history.replaceState(null, '', location.pathname + '?join'); renderJoin(); },
     qrBig: () => { openModal('<div class="qrBig"><h2>📱 掃描加入</h2><div class="qr" id="qrModal"></div><div class="joinCode" style="font-size:3.4rem">' + NET.code + '</div><div class="joinUrl">' + esc(joinUrl(NET.code)) + '</div><button class="btn" data-act="close">關閉</button></div>', true); drawQR($('qrModal'), Math.min(420, innerWidth - 90, innerHeight - 280)); },
-    joinedList: openJoined, joinedCsv,
+    joinedList: () => guardView('看誰加入了', openJoined), joinedCsv,
     lobby: openLobby, lobbyRefresh: fetchLobby, lobbyCode: () => { if (JOIN) { closeModal(); return; } location.href = '?join'; },
     netName: () => { const name = cut(($('netName').value || '').replace(/[|<>\u0000-\u001f]/g, '').trim(), 20), pub = $('netPub').checked; lsPut('rinfo.' + NET.code, {name, pub}); NET.nameAsk = true; if (name) sendRoomInfo(); else { send({t:'room', name:'', pub:false}); } lastStageKey = ''; votePaint(); },
     copyJoin: () => copyText(joinUrl(NET.code)),
@@ -1201,9 +1321,9 @@ document.addEventListener('click', (e) => {
     vAnsOk: () => { const p = S.vote.cur; let a = Array.from(document.querySelectorAll('[data-ans-pick][aria-pressed="true"]')).map((b) => b.dataset.ansPick).join(''); if (p.type !== 'm') a = a.slice(-1); p.ans = a; saveVote(); bankSetAns(p.bankIdx, a, p.q); if (p.state !== 'open') setTeacher(teacherVoteName(p)); closeModal(); votePaint(); if (a && p.state === 'open') toast('截止後學生才會看到答案'); },
     vAnsClear: () => { const p = S.vote.cur; p.ans = ''; saveVote(); setTeacher(teacherVoteName(p)); closeModal(); votePaint(); },
     vCsv: () => download('課堂投票紀錄-' + new Date().toLocaleDateString('sv') + '.csv', pollCsv(), 'text/csv'),
-    vClearHist: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定清除？'; return; } const id = roster().id; S.polls = lsJson('polls', []).filter((h) => h.rid && h.rid !== id); lsPut('polls', S.polls); renderVote(); },
+    vClearHist: () => { const id = roster().id; blockedWhy('hist', id).then((w) => { if (w.length) { blockedModal('上課中不能清除紀錄', w); return; } sureOr(t, '確定清除？', '清除「' + roster().name + '」的本機紀錄', () => { S.polls = lsJson('polls', []).filter((h) => h.rid && h.rid !== id); lsPut('polls', S.polls); renderVote(); toast('已清除這一班的紀錄'); }); }); },
     vSend: () => { if (JS.picks) voteSend(JS.pid, JS.picks); renderJoin(); },
-    scCsv: () => scoreExport('csv'), scXlsx: () => scoreExport('xlsx'), scBoard: openBoard, scResults: () => openResults(),
+    scCsv: () => guardView('下載成績', () => scoreExport('csv')), scXlsx: () => guardView('下載成績', () => scoreExport('xlsx')), scBoard: openBoard, scResults: () => openResults(),
     quizNew: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定開始新測驗？（成績另外記，題庫從頭出）'; return; } autoStop(); if (S.vote.cur && S.vote.cur.quiz) { archivePoll(); S.vote.cur = null; saveVote(); if (NET.want) setTeacher('T|w'); } newQuiz(); S.bank.used = []; lsPut('bank', S.bank); renderTool(); toast('已開始新測驗：' + S.qs.name); },
     bankOpen: () => { bankDraft = null; bankModal(); }, bankPick: () => $('bankFile').click(), bankUse,
     bankParse: () => { const r = TCHIO.parseQuizText($('bankText').value); bankDraft = Object.assign(r, {name:'貼上的題目'}); if (!r.items.length) toast('找不到題目，請參考格式說明'); const keep = $('bankText').value; bankModal(); $('bankText').value = keep; },
@@ -1228,14 +1348,25 @@ document.addEventListener('click', (e) => {
       bankSetAns(i, a); const p = S.vote.cur; if (p && p.bankIdx === i && p.quiz) { p.ans = q.type === 's' ? a.slice(-1) : a; if (q.type === 'm' && p.type === 's') p.type = 'm'; saveVote(); if (p.state !== 'open') setTeacher(teacherVoteName(p)); lastStageKey = ''; votePaint(); }
       closeModal(); renderVote(); toast(a ? '答案已存進題庫' : '已清除答案'); },
     bankReset: () => { autoStop(); if (quizPolls(S.qs.id).length) newQuiz(S.qs.name); reorderBank((S.quizOpt.order === 'rand' ? '已重新洗牌，' : '') + '開始新的一場測驗'); renderVote(); },
-    bankClear: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '確定清空題庫？'; return; } S.bank = {name:'', items:[], used:[], order:[]}; lsPut('bank', S.bank); renderVote(); },
+    bankClear: () => { blockedWhy('bank').then((w) => { if (w.length) { blockedModal('測驗進行中不能清空題庫', w, '請先停止自動出題、截止目前的題目再清空。'); return; } sureOr(t, '確定清空題庫？', '清空題庫', () => { S.bank = {name:'', items:[], used:[], order:[]}; lsPut('bank', S.bank); renderTool(); toast('題庫已清空'); }); }); },
     whoEdit: () => { JS.whoEdit = true; renderJoin(); },
     buzz: () => { const ts = teacherState(); if (!ts || ts[1] !== 'b' || ts[3] !== 'o') return; myName('B|' + ts[2] + '|' + JS.who); if (navigator.vibrate) navigator.vibrate(60); renderJoin(); },
 
     sndTest: () => SND.win(),
     foldAll: () => { const ds = document.querySelectorAll('.set-sec'), anyClosed = Array.from(ds).some((x) => !x.open); ds.forEach((x) => { x.open = anyClosed; }); saveFold(); },
-    backup, restore: () => $('restoreFile').click(),
-    wipe: () => { if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = '再按一次：名單、紀錄、設定全部刪除'; return; } Object.keys(localStorage).filter((k) => k.indexOf(P) === 0).forEach((k) => localStorage.removeItem(k)); location.reload(); },
+    backup: () => guardView('下載備份檔（含名單與成績）', backup),
+    restore: () => { blockedWhy('wipe').then((w) => { if (w.length) { blockedModal('上課中不能還原備份', w, '還原會覆蓋這台電腦的名單與紀錄。請先關閉所有分頁的教室再還原。'); return; } needAdmin('從備份檔還原（會覆蓋目前資料）', () => { const f = $('restoreFile'); if (f) f.click(); else { openSettings(); setTimeout(() => $('restoreFile').click(), 50); } }, true); }); },
+    wipe: () => { blockedWhy('wipe').then((w) => { if (w.length) { blockedModal('上課中不能清除全部資料', w, '清除會連教室金鑰一起刪掉，正在上的課會斷線。請先在每個分頁按「🚪 關閉教室」再清除。'); return; } sureOr(t, '再按一次：名單、紀錄、設定全部刪除', '清除全部資料（名單、紀錄、題庫、設定）', () => wipeAll(true)); }); },
+    admOk,
+    admLock: () => { ADM.until = 0; updAdm(); if ($('modal').classList.contains('show') && document.querySelector('[data-sec=adm]')) openSettings(); toast('已上鎖'); },
+    admSet: () => { const np = readNewPin(); if (np.err) { toast(np.err); return; } if (np.none) { toast('請輸入 4～6 位數字'); return; }
+      saveAdm(np.pin, $('admListCk').checked).then(() => { ADM.until = Date.now() + 600000; updAdm(); openSettings(); toast('已設定管理密碼'); }); },
+    admSave: () => { const np = readNewPin(); if (np.err) { toast(np.err); return; } const list = $('admListCk').checked;
+      admCheck(($('admOld') || {}).value).then((ok) => { if (!ok) { toast('目前的密碼不對'); return; }
+        const a = admInfo(); (np.pin ? saveAdm(np.pin, list) : Promise.resolve(lsPut('adm', Object.assign(a, {list})))).then(() => { ADM.until = Date.now() + 600000; updAdm(); openSettings(); toast('已儲存'); }); }, (m) => toast(m)); },
+    admRemove: () => { admCheck(($('admOld') || {}).value).then((ok) => { if (!ok) { toast('請先輸入正確的目前密碼'); return; } lsDel('adm'); ADM.until = 0; updAdm(); openSettings(); toast('已取消管理密碼'); }, (m) => toast(m)); },
+    admForgot: () => { openModal('<h2>⚠ 忘記管理密碼</h2><p>只能<b>清除這台電腦上課堂小幫手的全部資料</b>（名單、紀錄、題庫、設定、管理密碼）重新開始，無法復原。</p><p class="small">確定的話，請在下面輸入「清除全部」。</p><input class="tx" id="forgotTx" autocomplete="off" placeholder="清除全部"><div class="stack"><button class="btn red" data-act="admForgotYes">清除全部資料並重設</button><button class="btn alt" data-act="close">取消</button></div>'); },
+    admForgotYes: () => { if ((($('forgotTx') || {}).value || '').trim() !== '清除全部') { toast('請輸入「清除全部」'); return; } blockedWhy('wipe').then((w) => { if (w.length) { blockedModal('上課中不能清除', w); return; } wipeAll(false); }); },
   };
   if (A[act]) A[act]();
 });
@@ -1316,7 +1447,7 @@ if (JOIN) {
   if (/^[A-Z0-9]{6}$/.test(c)) joinStart(c); else renderJoin();
 } else {
   renderShell(); renderTool(); startLobby();
-  setInterval(tTick, 200);
+  setInterval(tTick, 200); setInterval(updAdm, 1000);
   const room = ssGet('room');
   S.vote.cur = ssJson('vcur', null) || (room ? lsJson('vcur.' + room, null) : null);
   if (S.vote.cur && S.vote.cur.state === 'open') NET.state = teacherVoteName(S.vote.cur);
@@ -1327,5 +1458,5 @@ if (JOIN) {
   if (isVT()) renderTool();
   if (!lsGet('warnSeen')) { lsSet('warnSeen', '1'); showWarn(); }
 }
-window._tch = {S, T, B, NET, JS, setTab, doDraw, doGroup, tSet, bzStart, bzHit, tally, pollChats, renderTool, openJoined, revealAll, openResults, scoreRows, nextBankIdx, roundPos, LOB, fetchLobby, AUTO, autoStart, newQuiz, openBoard, importRoster, rosterExport, scoreRows, bankUse, bankFromFile, bankStart, scoreExport, openRoster};
+window._tch = {ADM, admHas, myLive, blockedWhy, S, T, B, NET, JS, setTab, doDraw, doGroup, tSet, bzStart, bzHit, tally, pollChats, renderTool, openJoined, revealAll, openResults, scoreRows, nextBankIdx, roundPos, LOB, fetchLobby, AUTO, autoStart, newQuiz, openBoard, importRoster, rosterExport, scoreRows, bankUse, bankFromFile, bankStart, scoreExport, openRoster};
 })();
